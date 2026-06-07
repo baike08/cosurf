@@ -1,0 +1,26 @@
+{
+  "id": "python-calculator",
+  "name": "Python 计算器",
+  "description": "使用 Python 执行数学计算",
+  "type": "script",
+  "enabled": true,
+  "tags": ["python", "calculator", "math"],
+  "config": {
+    "script": {
+      "language": "python",
+      "source": "import sys\nimport json\n\n# 读取参数文件\nwith open(sys.argv[1], 'r') as f:\n    args = json.load(f)\n\nexpression = args.get('expression', '0')\n\ntry:\n    # 安全地评估表达式（仅允许基本运算）\n    result = eval(expression, {\"__builtins__\": {}}, {})\n    print(f\"Result: {result}\")\nexcept Exception as e:\n    print(f\"Error: {str(e)}\", file=sys.stderr)\n    sys.exit(1)",
+      "is_file": false
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string",
+          "description": "要计算的数学表达式，如: 2 + 3 * 4",
+          "examples": ["2 + 3", "10 / 3", "(5 + 3) * 2"]
+        }
+      },
+      "required": ["expression"]
+    }
+  }
+}

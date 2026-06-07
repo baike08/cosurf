@@ -1,0 +1,44 @@
+{
+  "id": "alibabacloud-iqs-search",
+  "name": "阿里云 IQS 搜索",
+  "description": "使用阿里云智能查询服务(IQS)进行实时网页搜索和内容提取",
+  "type": "script",
+  "enabled": false,
+  "tags": ["search", "iqs", "aliyun", "web"],
+  "config": {
+    "script": {
+      "language": "javascript",
+      "source": "const https = require('https');\nconst fs = require('fs');\n\n// 读取参数\nconst argsFile = process.argv[2];\nconst args = JSON.parse(fs.readFileSync(argsFile, 'utf8'));\n\nconst query = args.query || '';\nconst engineType = args.engine_type || 'Generic';\nconst timeRange = args.time_range || 'OneWeek';\nconst maxResults = args.max_results || 5;\n\n// 从环境变量或配置文件获取 API Key\nlet apiKey = process.env.ALIYUN_IQS_API_KEY;\nif (!apiKey) {\n  try {\n    const envFile = require('path').join(require('os').homedir(), '.alibabacloud', 'iqs', 'env');\n    const envContent = fs.readFileSync(envFile, 'utf8');\n    const match = envContent.match(/ALIYUN_IQS_API_KEY=(.+)/);\n    if (match) {\n      apiKey = match[1].trim();\n    }\n  } catch (e) {\n    // 忽略文件读取错误\n  }\n}\n\nif (!apiKey) {\n  console.error('Error: ALIYUN_IQS_API_KEY not found. Please set it in environment or ~/.alibabacloud/iqs/env');\n  process.exit(1);\n}\n\n// 构建请求\nconst postData = JSON.stringify({\n  query: query,\n  engineType: engineType,\n  timeRange: timeRange,\n  maxResults: maxResults\n});\n\nconst options = {\n  hostname: 'iqs.aliyuncs.com',\n  port: 443,\n  path: '/api/v1/search',\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Length': Buffer.byteLength(postData)\n  }\n};\n\nconst req = https.request(options, (res) => {\n  let data = '';\n  \n  res.on('data', (chunk) => {\n    data += chunk;\n  });\n  \n  res.on('end', () => {\n    try {\n      const result = JSON.parse(data);\n      \n      if (result.results && result.results.length > 0) {\n        // 格式化输出结果\n        const formatted = result.results.map((item, index) => {\n          return `[${index + 1}] ${item.title}\\nURL: ${item.url}\\nSummary: ${item.snippet || 'N/A'}\\n`;\n        }).join('\\n');\n        \n        console.log(formatted);\n      } else {\n        console.log('No results found.');\n      }\n    } catch (e) {\n      console.error('Failed to parse response:', data);\n      process.exit(1);\n    }\n  });\n});\n\nreq.on('error', (e) => {\n  console.error(`Request failed: ${e.message}`);\n  process.exit(1);\n});\n\nreq.write(postData);\nreq.end();",
+      "is_file": false
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "搜索查询词"
+        },
+        "engine_type": {
+          "type": "string",
+          "description": "搜索引擎类型",
+          "enum": ["Generic", "News", "Academic"],
+          "default": "Generic"
+        },
+        "time_range": {
+          "type": "string",
+          "description": "时间范围",
+          "enum": ["OneDay", "OneWeek", "OneMonth", "OneYear", "NoLimit"],
+          "default": "OneWeek"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "最大结果数",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": ["query"]
+    }
+  }
+}

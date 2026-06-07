@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+target/
+.tools/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/gen/
+src-tauri/capabilities/default.json.bak
+
+# Misc
+.turbo/
+.vite/
+*.tsbuildinfo
+
+# Installer bitmaps (optional)
+src-tauri/icons/installer-*.bmp

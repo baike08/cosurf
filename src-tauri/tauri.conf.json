@@ -1,0 +1,73 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "CoSurf",
+  "version": "0.1.0",
+  "identifier": "com.cosurf.app",
+  "build": {
+    "frontendDist": "../src-web/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "cd .. && pnpm --filter @cosurf/shared build && pnpm --filter @cosurf/web dev",
+    "beforeBuildCommand": "cd .. && pnpm --filter @cosurf/shared build && pnpm --filter @cosurf/web build"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "CoSurf",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "useHttpsScheme": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: https: http://localhost:*; connect-src 'self' https: http://localhost:* ws: wss:; img-src 'self' blob: data: https:; media-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; frame-src 'self' blob: https: *; worker-src 'self' blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; object-src 'none'; base-uri 'self'; form-action 'self';"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "sidebarImage": null,
+        "headerImage": null
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "wix": null
+    },
+    "licenseFile": "../LICENSE",
+    "shortDescription": "CoSurf - AI Native Browser",
+    "longDescription": "CoSurf（伴游）是一款 AI 原生的桌面浏览器，集成多模型 AI 对话、网页操作 Agent、智能总结等能力，让浏览更智能。"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    }
+  }
+}

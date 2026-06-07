@@ -1,0 +1,37 @@
+{
+  "name": "cosurf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoSurf（伴游）- AI Native Desktop Browser",
+  "license": "MIT",
+  "author": "CoSurf Team",
+  "homepage": "https://github.com/cosurf/cosurf",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cosurf/cosurf.git"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @cosurf/web dev",
+    "dev:tauri": "tauri dev",
+    "dev:full": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "build": "pnpm --filter @cosurf/shared build && pnpm --filter @cosurf/web build",
+    "build:tauri": "tauri build",
+    "build:release": "powershell -ExecutionPolicy Bypass -File scripts/build.ps1",
+    "lint": "pnpm --filter @cosurf/web lint",
+    "typecheck": "pnpm --filter @cosurf/web typecheck",
+    "check": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
+    "test": "pnpm -r test",
+    "playwright:dev": "pnpm --filter @cosurf/playwright-service dev",
+    "clean": "rimraf node_modules dist target"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "typescript": "^5.7.0",
+    "rimraf": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0"
+}

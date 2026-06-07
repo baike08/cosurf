@@ -1,0 +1,27 @@
+{
+  "id": "echo-skill",
+  "name": "Echo 消息",
+  "description": "简单的回显技能，用于测试 Skills 系统",
+  "type": "cli",
+  "enabled": true,
+  "tags": ["test", "demo"],
+  "config": {
+    "cli": {
+      "command": "echo",
+      "args_template": ["Hello from {{message}}!"],
+      "timeout": 5,
+      "require_confirmation": false
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "要回显的消息",
+          "default": "CoSurf"
+        }
+      },
+      "required": []
+    }
+  }
+}
