@@ -20,6 +20,24 @@ pub fn run() {
         )
         .init();
 
+    // 在 Tauri 初始化前修正窗口状态缓存，防止插件恢复 decorated: true
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let state_file = std::path::PathBuf::from(app_data)
+            .join("com.cosurf.app")
+            .join(".window-state.json");
+        if state_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&state_file) {
+                if content.contains("\"decorated\": true") || content.contains("\"decorated\":true") {
+                    let fixed = content
+                        .replace("\"decorated\": true", "\"decorated\": false")
+                        .replace("\"decorated\":true", "\"decorated\":false");
+                    let _ = std::fs::write(&state_file, fixed);
+                    eprintln!("[CoSurf] Fixed window state: decorated -> false");
+                }
+            }
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

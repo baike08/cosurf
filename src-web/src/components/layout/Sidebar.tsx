@@ -4,23 +4,26 @@ import {
   MessageSquare,
   X,
   Pin,
-  ExternalLink,
   Trash2,
   Plus,
   Download,
+  Layers,
 } from "lucide-react";
 import { useUIStore, type SidebarPanel } from "@/stores/uiStore";
 import { useConversationStore } from "@/stores/conversationStore";
-import { mockBookmarks, mockHistory } from "@/lib/mock";
-import { cn, truncate, formatTime, getDomain } from "@/lib/utils";
+import { cn, truncate } from "@/lib/utils";
 import { IconButton } from "@/components/ui/IconButton";
 import { DownloadsPanel } from "@/components/sidebar/DownloadsPanel";
+import { TabsPanel } from "@/components/sidebar/TabsPanel";
+import { HistoryPanel } from "@/components/sidebar/HistoryPanel";
+import { BookmarksPanel } from "@/components/sidebar/BookmarksPanel";
 
 const panelConfig: Record<Exclude<SidebarPanel, "none">, { icon: typeof Bookmark; label: string }> = {
   bookmarks: { icon: Bookmark, label: "书签" },
   history: { icon: History, label: "历史记录" },
   conversations: { icon: MessageSquare, label: "对话历史" },
   downloads: { icon: Download, label: "下载" },
+  tabs: { icon: Layers, label: "标签管理" },
 };
 
 export function Sidebar() {
@@ -50,64 +53,12 @@ export function Sidebar() {
       </div>
 
       <div className="flex-1 overflow-y-auto pt-2">
-        {sidebarPanel === "bookmarks" && <BookmarkPanel />}
+        {sidebarPanel === "bookmarks" && <BookmarksPanel />}
         {sidebarPanel === "history" && <HistoryPanel />}
         {sidebarPanel === "conversations" && <ConversationPanel />}
         {sidebarPanel === "downloads" && <DownloadsPanel />}
+        {sidebarPanel === "tabs" && <TabsPanel />}
       </div>
-    </div>
-  );
-}
-
-function BookmarkPanel() {
-  return (
-    <div className="py-1">
-      {mockBookmarks.map((bm) => (
-        <div
-          key={bm.id}
-          className="flex items-center gap-2 px-3 py-1.5 hover:bg-surface-hover cursor-pointer group"
-        >
-          <div className="w-4 h-4 rounded-sm bg-surface-tertiary flex items-center justify-center shrink-0">
-            <span className="text-2xs font-bold text-content-tertiary">
-              {getDomain(bm.url).charAt(0).toUpperCase()}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs truncate">{bm.title}</div>
-            <div className="text-2xs text-content-tertiary truncate">
-              {getDomain(bm.url)}
-            </div>
-          </div>
-          <IconButton size="sm" className="opacity-0 group-hover:opacity-100">
-            <ExternalLink className="w-3 h-3" />
-          </IconButton>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function HistoryPanel() {
-  return (
-    <div className="py-1">
-      {mockHistory.map((entry) => (
-        <div
-          key={entry.id}
-          className="flex items-center gap-2 px-3 py-1.5 hover:bg-surface-hover cursor-pointer group"
-        >
-          <div className="w-4 h-4 rounded-sm bg-surface-tertiary flex items-center justify-center shrink-0">
-            <span className="text-2xs font-bold text-content-tertiary">
-              {getDomain(entry.url).charAt(0).toUpperCase()}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs truncate">{entry.title}</div>
-            <div className="text-2xs text-content-tertiary truncate">
-              {getDomain(entry.url)} · {formatTime(entry.visitedAt)}
-            </div>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

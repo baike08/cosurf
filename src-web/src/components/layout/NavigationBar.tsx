@@ -14,12 +14,19 @@ import {
   History,
   MessageSquare,
   MousePointer2,
+  Wrench,
+  Layers,
+  Minus,
+  Square,
+  X,
 } from "lucide-react";
 import { useTabStore } from "@/stores/tabStore";
 import { useUIStore } from "@/stores/uiStore";
+import { useBookmarkStore } from "@/stores/bookmarkStore";
 import { IconButton } from "@/components/ui/IconButton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn, getDomain } from "@/lib/utils";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function NavigationBar() {
   // 【关键修复】分别订阅 tabs 和 activeTabId，避免对象引用导致的无限循环
@@ -35,11 +42,54 @@ export function NavigationBar() {
   const aiPanelOpen = useUIStore((s) => s.aiPanelOpen);
   const setSidebarPanel = useUIStore((s) => s.setSidebarPanel);
   const openSettings = useUIStore((s) => s.openSettings);
+  const toggleToolbox = useUIStore((s) => s.toggleToolbox);
+  const toolboxOpen = useUIStore((s) => s.toolboxOpen);
 
   const activeTab = tabs.find((t: any) => t.id === activeTabId);
   const [urlInput, setUrlInput] = useState(activeTab?.url ?? "");
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 书签状态
+  const bookmarks = useBookmarkStore((s) => s.bookmarks);
+  const loadBookmarks = useBookmarkStore((s) => s.loadBookmarks);
+  const addBookmark = useBookmarkStore((s) => s.addBookmark);
+  const removeBookmarkByUrl = useBookmarkStore((s) => s.removeBookmarkByUrl);
+
+  // 检查当前页面是否已收藏
+  const isCurrentPageBookmarked = activeTab?.url
+    ? bookmarks.some((b) => b.url === activeTab.url)
+    : false;
+
+  // 初始化加载书签
+  useEffect(() => {
+    loadBookmarks();
+  }, [loadBookmarks]);
+
+  // 切换书签
+  const handleToggleBookmark = useCallback(async () => {
+    if (!activeTab?.url || activeTab.url === "about:blank") return;
+    if (isCurrentPageBookmarked) {
+      await removeBookmarkByUrl(activeTab.url);
+    } else {
+      await addBookmark(
+        activeTab.title || getDomain(activeTab.url),
+        activeTab.url,
+        undefined,
+        undefined
+      );
+    }
+  }, [activeTab, isCurrentPageBookmarked, addBookmark, removeBookmarkByUrl]);
+
+  // 监听 Ctrl+L 聚焦地址栏事件
+  useEffect(() => {
+    const handleFocusAddressBar = () => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    };
+    window.addEventListener('cosurf:focus-address-bar', handleFocusAddressBar);
+    return () => window.removeEventListener('cosurf:focus-address-bar', handleFocusAddressBar);
+  }, []);
 
   // 调试日志：检查导航栏的状态
   useEffect(() => {
@@ -101,7 +151,7 @@ export function NavigationBar() {
       if (url.includes(".") && !url.includes(" ")) {
         url = "https://" + url;
       } else {
-        url = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+        url = `https://www.baidu.com/s?wd=${encodeURIComponent(url)}`;
       }
     }
     
@@ -123,10 +173,27 @@ export function NavigationBar() {
   const isSecure = activeTab?.url?.startsWith("https://") ?? false;
   const domain = activeTab && activeTab.url !== "about:blank" ? getDomain(activeTab.url) : "";
 
+  // 窗口控制
+  const handleMinimize = useCallback(async () => {
+    try { await getCurrentWindow().minimize(); } catch (e) { console.error('Failed to minimize:', e); }
+  }, []);
+
+  const handleMaximize = useCallback(async () => {
+    try {
+      const win = getCurrentWindow();
+      if (await win.isMaximized()) { await win.unmaximize(); } 
+      else { await win.maximize(); }
+    } catch (e) { console.error('Failed to maximize:', e); }
+  }, []);
+
+  const handleClose = useCallback(async () => {
+    try { await getCurrentWindow().close(); } catch (e) { console.error('Failed to close:', e); }
+  }, []);
+
   return (
-    <div className="h-nav-bar flex items-center gap-1 px-2 bg-surface border-b border-border select-none">
+    <div className="h-nav-bar flex items-center gap-1 px-2 bg-surface border-b border-border select-none drag-region">
       {/* 导航按钮组 */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 no-drag">
         <Tooltip label="后退">
           <IconButton size="sm" disabled={!canGoBack} onClick={handleGoBack}>
             <ArrowLeft />
@@ -156,7 +223,7 @@ export function NavigationBar() {
       {/* 地址栏 */}
       <div
         className={cn(
-          "flex-1 flex items-center h-8 rounded-lg px-3 gap-2 transition-all",
+          "flex-1 flex items-center h-8 rounded-lg px-3 gap-2 transition-all no-drag",
           "bg-surface-secondary border",
           isFocused
             ? "border-brand-500 ring-2 ring-brand-500/20"
@@ -197,16 +264,38 @@ export function NavigationBar() {
 
         {/* 书签按钮 */}
         {domain && (
-          <Tooltip label="添加书签">
-            <IconButton size="sm" className="shrink-0">
-              <Star className="w-3.5 h-3.5" />
+          <Tooltip label={isCurrentPageBookmarked ? "取消收藏" : "添加书签"}>
+            <IconButton
+              size="sm"
+              className={cn("shrink-0", isCurrentPageBookmarked && "text-amber-500")}
+              onClick={handleToggleBookmark}
+            >
+              <Star className={cn("w-3.5 h-3.5", isCurrentPageBookmarked && "fill-current")} />
             </IconButton>
           </Tooltip>
         )}
       </div>
 
       {/* 右侧工具按钮 */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 no-drag">
+        <Tooltip label="标签管理">
+          <IconButton
+            size="sm"
+            active={useUIStore.getState().sidebarPanel === "tabs" && useUIStore.getState().sidebarOpen}
+            onClick={() => setSidebarPanel("tabs")}
+          >
+            <Layers />
+          </IconButton>
+        </Tooltip>
+        <Tooltip label="工具箱">
+          <IconButton
+            size="sm"
+            active={toolboxOpen}
+            onClick={toggleToolbox}
+          >
+            <Wrench />
+          </IconButton>
+        </Tooltip>
         <Tooltip label="书签管理">
           <IconButton
             size="sm"
@@ -257,6 +346,31 @@ export function NavigationBar() {
             <Settings />
           </IconButton>
         </Tooltip>
+      </div>
+
+      {/* 窗口控制按钮 */}
+      <div className="flex items-center gap-0.5 ml-1 no-drag">
+        <button
+          onClick={handleMinimize}
+          className="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-hover text-content-tertiary hover:text-content transition-colors"
+          title="最小化"
+        >
+          <Minus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={handleMaximize}
+          className="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-hover text-content-tertiary hover:text-content transition-colors"
+          title="最大化"
+        >
+          <Square className="w-3 h-3" />
+        </button>
+        <button
+          onClick={handleClose}
+          className="w-8 h-8 flex items-center justify-center rounded hover:bg-red-500 hover:text-white text-content-tertiary transition-colors"
+          title="关闭"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   );

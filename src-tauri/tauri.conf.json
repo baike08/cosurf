@@ -20,10 +20,8 @@
         "minHeight": 680,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true,
+        "decorations": false,
         "center": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "useHttpsScheme": true,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }

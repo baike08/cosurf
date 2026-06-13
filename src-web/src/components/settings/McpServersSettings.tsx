@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Plus, Trash2, Edit2, X, TestTube, Loader2, Upload, Play, Power, PowerOff, Server } from "lucide-react";
+import { Trash2, Edit2, X, TestTube, Loader2, Upload, Play, Power, PowerOff, Server } from "lucide-react";
 import Editor from "@monaco-editor/react";
 
 // Tauri 错误返回 { code, message } 对象，需要提取 message

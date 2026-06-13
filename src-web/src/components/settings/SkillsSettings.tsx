@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Upload, X, Plus, Trash2, ToggleLeft, ToggleRight, Code, FolderOpen, FileText, Edit2, Save, Eye } from "lucide-react";
+import { X, Plus, Trash2, ToggleLeft, ToggleRight, Code, FolderOpen, FileText, Edit2, Save, Eye } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 

@@ -75,6 +75,7 @@ export const mockMessages: Message[] = [
     ],
     createdAt: now,
     updatedAt: now,
+    feedback: "",
   },
   {
     id: "msg-2",
@@ -87,6 +88,7 @@ export const mockMessages: Message[] = [
     attachments: [],
     createdAt: now,
     updatedAt: now,
+    feedback: "",
   },
   {
     id: "msg-3",
@@ -98,6 +100,7 @@ export const mockMessages: Message[] = [
     attachments: [],
     createdAt: now,
     updatedAt: now,
+    feedback: "",
   },
   {
     id: "msg-4",
@@ -110,6 +113,7 @@ export const mockMessages: Message[] = [
     attachments: [],
     createdAt: now,
     updatedAt: now,
+    feedback: "",
   },
 ];
 
