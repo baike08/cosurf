@@ -19,8 +19,7 @@ path = "src/main.rs"
 tauri-build = { version = "2.2", features = [] }
 
 [dependencies]
-tauri = { version = "2.5", features = ["tray-icon"] }
-tauri-plugin-shell = "2.2"
+tauri = { version = "2.5", features = ["tray-icon", "unstable"] }
 tauri-plugin-dialog = "2.2"
 tauri-plugin-fs = "2.2"
 tauri-plugin-global-shortcut = "2.2"
@@ -67,3 +66,6 @@ dirs = "5.0"
 
 # 异步 trait
 async-trait = "0.1"
+
+# 打开系统浏览器
+open = "5.3"

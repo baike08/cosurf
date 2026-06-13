@@ -10,7 +10,7 @@
     "beforeBuildCommand": "cd .. && pnpm --filter @cosurf/shared build && pnpm --filter @cosurf/web build"
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "CoSurf",
@@ -24,8 +24,7 @@
         "center": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "useHttpsScheme": true,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
+        "useHttpsScheme": true
       }
     ],
     "security": {
