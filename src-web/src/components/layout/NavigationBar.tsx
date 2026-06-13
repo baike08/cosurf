@@ -26,6 +26,7 @@ import { useBookmarkStore } from "@/stores/bookmarkStore";
 import { IconButton } from "@/components/ui/IconButton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn, getDomain } from "@/lib/utils";
+import { isToolUrl, parseToolUrl } from "@/components/tools/ToolPage";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function NavigationBar() {
@@ -143,6 +144,26 @@ export function NavigationBar() {
     // 处理特殊 URL
     if (url === "about:blank") {
       updateTab(activeTabId, { url, title: "新标签页", isLoading: false });
+      return;
+    }
+
+    // 内置工具箱协议 cosurf://tools/xxx
+    if (isToolUrl(url)) {
+      const toolId = parseToolUrl(url);
+      // 从工具箱定义中查找工具名称
+      const toolNames: Record<string, string> = {
+        "json-parser": "JSON 解析",
+        "json-editor": "JSON 编辑",
+        "json-validator": "JSON 检查",
+        "regex-tester": "正则测试",
+        "qrcode-generator": "二维码生成",
+        "crypto": "加密解密",
+        "text-diff": "文本对比",
+      };
+      const title = toolId ? (toolNames[toolId] || toolId) : "工具";
+      navigateTo(activeTabId, url);
+      updateTab(activeTabId, { title, isLoading: false });
+      inputRef.current?.blur();
       return;
     }
     

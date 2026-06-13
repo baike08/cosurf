@@ -16,6 +16,160 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// 高亮匹配文本的辅助函数（组件外部）
+function highlightText(text: string, query: string): string {
+  if (!query.trim()) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'gi');
+  const parts = text.split(regex);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? `<mark class="bg-yellow-400/40 text-yellow-800 dark:text-yellow-200 rounded px-0.5">${part}</mark>` : part
+  ).join('');
+}
+
+// JSON 树形视图组件（组件外部，避免每次渲染重建）
+// 每行始终可见复制图标，避免 hover 隐藏按钮导致的混淆
+function JsonTreeView({
+  data,
+  level = 0,
+  path = "",
+  searchQuery,
+  copiedValue,
+  onCopyValue,
+  onContextMenu,
+}: {
+  data: any;
+  level?: number;
+  path?: string;
+  searchQuery: string;
+  copiedValue: string | null;
+  onCopyValue: (value: any, key?: string) => void;
+  onContextMenu: (e: React.MouseEvent, value: any, path: string) => void;
+}) {
+  // null 值
+  if (data === null) {
+    const copyKey = path || "null";
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <span className="text-purple-500">null</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyValue(data, path); }}
+          className={cn("p-0.5 rounded transition-colors shrink-0",
+            copiedValue === copyKey ? "text-green-500" : "text-content-tertiary/40 hover:text-brand-500 hover:bg-brand-500/10"
+          )}
+          title={`复制 ${path || "null"}`}
+        >
+          <Copy className="w-2.5 h-2.5" />
+        </button>
+      </span>
+    );
+  }
+  
+  // 原始值
+  if (typeof data !== "object") {
+    const raw = typeof data === "string" ? `"${data}"` : String(data);
+    const colorClass = typeof data === "string" ? "text-green-600 dark:text-green-400" : 
+                      typeof data === "number" ? "text-blue-600 dark:text-blue-400" :
+                      "text-orange-600 dark:text-orange-400";
+    const displayHtml = searchQuery ? highlightText(raw, searchQuery) : null;
+    const copyKey = path || raw.substring(0, 50);
+    
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        {displayHtml ? (
+          <span className={colorClass} dangerouslySetInnerHTML={{ __html: displayHtml }} />
+        ) : (
+          <span className={colorClass}>{raw}</span>
+        )}
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyValue(data, path); }}
+          className={cn("p-0.5 rounded transition-colors shrink-0",
+            copiedValue === copyKey ? "text-green-500" : "text-content-tertiary/40 hover:text-brand-500 hover:bg-brand-500/10"
+          )}
+          title={`复制 ${path || "value"}`}
+        >
+          <Copy className="w-2.5 h-2.5" />
+        </button>
+      </span>
+    );
+  }
+  
+  const isArray = Array.isArray(data);
+  const entries = Object.entries(data);
+  const isEmpty = entries.length === 0;
+  
+  // 空对象/数组
+  if (isEmpty) {
+    return (
+      <span 
+        className="inline-flex items-center gap-0.5 cursor-pointer"
+        onContextMenu={(e) => onContextMenu(e, data, path)}
+      >
+        <span className="text-content-tertiary">{isArray ? "[]" : "{}"}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyValue(data, path); }}
+          className={cn("p-0.5 rounded transition-colors shrink-0",
+            copiedValue === path ? "text-green-500" : "text-content-tertiary/40 hover:text-brand-500 hover:bg-brand-500/10"
+          )}
+          title={`复制 ${path || "empty"}`}
+        >
+          <Copy className="w-2.5 h-2.5" />
+        </button>
+      </span>
+    );
+  }
+  
+  // 非空对象/数组
+  return (
+    <span className="inline-flex flex-col">
+      {/* 起始行：{ 或 [ + 复制整个对象按钮 */}
+      <span className="inline-flex items-center gap-0.5">
+        <span className="text-content-tertiary">{isArray ? "[" : "{"}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onCopyValue(data, path); }}
+          onContextMenu={(e) => { e.stopPropagation(); onContextMenu(e, data, path); }}
+          className={cn("p-0.5 rounded transition-colors shrink-0",
+            copiedValue === path && path !== "" ? "text-green-500" : "text-content-tertiary/40 hover:text-brand-500 hover:bg-brand-500/10"
+          )}
+          title={`复制整个${isArray ? '数组' : '对象'} (${entries.length}项)`}
+        >
+          <Copy className="w-2.5 h-2.5" />
+        </button>
+      </span>
+      {/* 每个条目一行 */}
+      {entries.map(([key, value], index) => {
+        const keyHtml = searchQuery ? highlightText(`"${key}"`, searchQuery) : null;
+        const childPath = isArray ? `${path}[${index}]` : `${path}${path ? "." : ""}${key}`;
+        const isLast = index === entries.length - 1;
+        
+        return (
+          <div key={index} className="flex items-center ml-4">
+            {!isArray && (
+              keyHtml ? (
+                <span className="text-red-600 dark:text-red-400 mr-1 shrink-0" dangerouslySetInnerHTML={{ __html: `"${key}":` }} />
+              ) : (
+                <span className="text-red-600 dark:text-red-400 mr-1 shrink-0">"{key}":</span>
+              )
+            )}
+            <JsonTreeView 
+              data={value} 
+              level={level + 1}
+              path={childPath}
+              searchQuery={searchQuery}
+              copiedValue={copiedValue}
+              onCopyValue={onCopyValue}
+              onContextMenu={onContextMenu}
+            />
+            {!isLast && <span className="text-content-tertiary">,</span>}
+          </div>
+        );
+      })}
+      <span className="text-content-tertiary">{isArray ? "]" : "}"}</span>
+    </span>
+  );
+}
+
 // JSON 解析器
 export function JsonParser() {
   const [input, setInput] = useState("");
@@ -28,6 +182,7 @@ export function JsonParser() {
   const [parsedJson, setParsedJson] = useState<any>(null);
   const [viewMode, setViewMode] = useState<"text" | "tree">("text");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; value: any; path: string } | null>(null);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
 
   const handleParse = useCallback(() => {
     if (!input.trim()) {
@@ -112,103 +267,40 @@ export function JsonParser() {
     setContextMenu(null);
   }, []);
 
-  // 高亮搜索结果
-  const highlightedOutput = useMemo(() => {
-    if (!searchQuery.trim() || !output) return output;
-    
-    const query = searchQuery.toLowerCase();
-    let result = output;
-    
-    // 匹配 key 和 value（包括字符串）
-    const regex = new RegExp(`("[^"]*${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^"]*")`, 'gi');
-    result = result.replace(regex, '<mark class="bg-yellow-500/30 text-yellow-700 dark:text-yellow-300 rounded px-0.5">$1</mark>');
-    
-    return result;
-  }, [output, searchQuery]);
+  // 高亮输入区搜索匹配
+  const highlightedInput = useMemo(() => {
+    if (!searchQuery.trim() || !input) return input;
+    return highlightText(input, searchQuery);
+  }, [input, searchQuery, highlightText]);
 
-  // JSON 树形视图组件
-  const JsonTreeView = ({ data, level = 0, path = "" }: { data: any; level?: number; path?: string }) => {
-    if (data === null) return <span className="text-purple-500">null</span>;
-    
-    if (typeof data !== "object") {
-      const displayValue = typeof data === "string" ? `"${data}"` : String(data);
-      const colorClass = typeof data === "string" ? "text-green-600 dark:text-green-400" : 
-                        typeof data === "number" ? "text-blue-600 dark:text-blue-400" :
-                        typeof data === "boolean" ? "text-orange-600 dark:text-orange-400" : "";
-      
-      return (
-        <span className="group relative inline-flex items-center gap-1">
-          <span className={colorClass}>{displayValue}</span>
-          <button
-            onClick={() => copyValue(data, path)}
-            onContextMenu={(e) => showContextMenu(e, data, path)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-brand-500/20 text-content-tertiary hover:text-brand-500"
-            title={`复制 ${path || "value"}`}
-          >
-            <Copy className="w-3 h-3" />
-          </button>
-          {copiedValue === (path || String(data).substring(0, 50)) && (
-            <span className="absolute -top-6 left-0 bg-brand-600 text-white text-2xs px-2 py-1 rounded whitespace-nowrap">
-              已复制!
-            </span>
-          )}
-        </span>
-      );
+  // 高亮输出区搜索匹配（全文匹配，不限于引号内）
+  const highlightedOutputText = useMemo(() => {
+    if (!searchQuery.trim() || !output) return output;
+    return highlightText(output, searchQuery);
+  }, [output, searchQuery, highlightText]);
+
+  // JSON 树形视图的回调（稳定引用，避免子组件不必要的重渲染）
+  const handleTreeCopy = useCallback((value: any, key?: string) => {
+    let textToCopy: string;
+    if (typeof value === "object" && value !== null) {
+      textToCopy = JSON.stringify(value, null, 2);
+    } else {
+      textToCopy = String(value);
     }
-    
-    const isArray = Array.isArray(data);
-    const entries = Object.entries(data);
-    const isEmpty = entries.length === 0;
-    
-    if (isEmpty) {
-      return (
-        <span 
-          className="group relative inline-flex items-center gap-1 cursor-pointer"
-          onContextMenu={(e) => showContextMenu(e, data, path)}
-        >
-          {isArray ? "[]" : "{}"}
-          <button
-            onClick={() => copyValue(data, path)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-brand-500/20 text-content-tertiary hover:text-brand-500"
-            title={`复制 ${path || "empty object/array"}`}
-          >
-            <Copy className="w-3 h-3" />
-          </button>
-        </span>
-      );
-    }
-    
-    return (
-      <div className="group relative">
-        <span className="text-content-tertiary">{isArray ? "[" : "{"}</span>
-        {/* 对象/数组的复制按钮 */}
-        <button
-          onClick={() => copyValue(data, path)}
-          onContextMenu={(e) => showContextMenu(e, data, path)}
-          className="opacity-0 group-hover:opacity-100 absolute -right-8 top-0 p-1 rounded hover:bg-brand-500/20 text-content-tertiary hover:text-brand-500 transition-opacity"
-          title={`复制整个${isArray ? '数组' : '对象'} (${entries.length}项)`}
-        >
-          <Copy className="w-3 h-3" />
-        </button>
-        <div className="ml-4">
-          {entries.map(([key, value], index) => (
-            <div key={index} className="flex items-start">
-              {!isArray && (
-                <span className="text-red-600 dark:text-red-400 mr-2">"{key}":</span>
-              )}
-              <JsonTreeView 
-                data={value} 
-                level={level + 1}
-                path={isArray ? `${path}[${index}]` : `${path}${path ? "." : ""}${key}`}
-              />
-              {index < entries.length - 1 && <span className=",">,</span>}
-            </div>
-          ))}
-        </div>
-        <span className="text-content-tertiary">{isArray ? "]" : "}"}</span>
-      </div>
-    );
-  };
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedValue(key || textToCopy.substring(0, 50));
+    setTimeout(() => setCopiedValue(null), 2000);
+    // 显示 toast 提示
+    const label = key || (typeof value === "object" ? "object" : textToCopy.substring(0, 20));
+    setCopyToast(`已复制: ${label}`);
+    setTimeout(() => setCopyToast(null), 1500);
+  }, []);
+
+  const handleTreeContextMenu = useCallback((e: React.MouseEvent, value: any, path: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, value, path });
+  }, []);
 
   const handleDownload = useCallback(() => {
     if (output) {
@@ -378,16 +470,30 @@ export function JsonParser() {
       <div className="flex-1 flex overflow-hidden">
         {/* 输入区 */}
         <div className="flex-1 flex flex-col border-r border-border">
-          <div className="px-3 py-2 bg-surface-secondary/50 border-b border-border/50 text-xs text-content-tertiary">
-            输入 JSON
+          <div className="px-3 py-2 bg-surface-secondary/50 border-b border-border/50 text-xs text-content-tertiary flex items-center justify-between">
+            <span>输入 JSON</span>
+            {searchQuery && highlightedInput !== input && (
+              <span className="text-amber-600 dark:text-amber-400 text-2xs">已高亮匹配项</span>
+            )}
           </div>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder='在此粘贴 JSON 数据，例如：\n{"name": "CoSurf", "version": "1.0"}'
-            className="flex-1 w-full p-4 bg-transparent text-sm text-content font-mono resize-none outline-none placeholder:text-content-tertiary"
-            spellCheck={false}
-          />
+          {searchQuery && highlightedInput !== input ? (
+            <pre
+              className="flex-1 w-full p-4 bg-transparent text-sm text-content font-mono overflow-auto whitespace-pre-wrap cursor-text"
+              dangerouslySetInnerHTML={{ __html: highlightedInput }}
+              onClick={() => {
+                // 点击高亮视图时切换到编辑模式
+                setSearchQuery("");
+              }}
+            />
+          ) : (
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder='在此粘贴 JSON 数据，例如：\n{"name": "CoSurf", "version": "1.0"}'
+              className="flex-1 w-full p-4 bg-transparent text-sm text-content font-mono resize-none outline-none placeholder:text-content-tertiary"
+              spellCheck={false}
+            />
+          )}
         </div>
 
         {/* 箭头 */}
@@ -403,7 +509,7 @@ export function JsonParser() {
               {output && !error && (
                 <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
               )}
-              {searchQuery && highlightedOutput !== output && (
+              {searchQuery && highlightedOutputText !== output && viewMode === "text" && (
                 <span className="text-amber-600 dark:text-amber-400 text-2xs ml-1">已高亮匹配项</span>
               )}
             </div>
@@ -436,12 +542,18 @@ export function JsonParser() {
           {/* 内容区域 */}
           {viewMode === "tree" && parsedJson ? (
             <div className="flex-1 overflow-auto p-4 font-mono text-sm">
-              <JsonTreeView data={parsedJson} />
+              <JsonTreeView
+                data={parsedJson}
+                searchQuery={searchQuery}
+                copiedValue={copiedValue}
+                onCopyValue={handleTreeCopy}
+                onContextMenu={handleTreeContextMenu}
+              />
             </div>
-          ) : searchQuery && highlightedOutput !== output ? (
+          ) : searchQuery && highlightedOutputText !== output ? (
             <pre
               className="flex-1 w-full p-4 bg-transparent text-sm text-content font-mono overflow-auto whitespace-pre-wrap"
-              dangerouslySetInnerHTML={{ __html: highlightedOutput }}
+              dangerouslySetInnerHTML={{ __html: highlightedOutputText }}
             />
           ) : (
             <textarea
