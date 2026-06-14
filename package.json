@@ -13,10 +13,8 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
-    "dev:tauri": "tauri dev",
     "dev:full": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
     "build": "electron-vite build",
-    "build:tauri": "tauri build",
     "build:release": "electron-vite build && electron-builder",
     "build:native": "cd native && napi build --platform --release",
     "build:native:debug": "cd native && napi build --platform",
@@ -29,7 +27,6 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.5.0",
     "@types/node": "^22.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.0.0",
