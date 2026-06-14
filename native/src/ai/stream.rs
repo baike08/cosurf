@@ -582,3 +582,241 @@ pub async fn generate_title(content: &str, config: &ModelConfig) -> AppResult<St
 
     Ok(title)
 }
+
+/// 优化的 Agent Loop（集成智能调度和上下文管理）
+pub async fn stream_chat_completion_optimized(
+    config: &ModelConfig,
+    messages: Vec<ChatMessage>,
+    conversation_id: &str,
+    message_id: &str,
+    callbacks: &StreamCallbacks,
+    skills_schemas: Vec<serde_json::Value>,
+) -> AppResult<()> {
+    use crate::ai::{scheduler, context_manager};
+    
+    info!("🤖 Starting Optimized Agent Loop for conversation {}", conversation_id);
+    
+    // 初始化上下文管理器
+    let mut ctx_mgr = context_manager::ContextManager::new(messages);
+    let mut iteration = 0;
+    let max_iterations = 30;
+    let token_budget = 100000; // 默认 100K tokens
+    
+    // 重复调用检测
+    let mut last_tool_signatures: Vec<String> = Vec::new();
+    let mut repeat_count = 0u32;
+    
+    loop {
+        iteration += 1;
+        info!("🔄 Optimized Agent Loop iteration {}/{}", iteration, max_iterations);
+        
+        // 1. 检查 Token 预算
+        let estimated_tokens = ctx_mgr.estimate_tokens();
+        if estimated_tokens > token_budget {
+            warn!("🛑 Token budget exceeded ({} / {})", estimated_tokens, token_budget);
+            callbacks.emit_chunk(conversation_id, message_id, 
+                "[系统] 已达到 Token 预算限制，停止执行", false, true);
+            break;
+        }
+        
+        // 2. 压缩上下文（如果需要）
+        ctx_mgr.compress_if_needed(token_budget, 0.8); // 压缩到 80%
+        
+        // 3. 执行单轮流式对话
+        let current_messages = ctx_mgr.messages();
+        let tool_calls_result = stream_single_turn(
+            config,
+            current_messages.clone(),
+            conversation_id,
+            message_id,
+            callbacks,
+            &skills_schemas,
+        ).await?;
+        
+        if tool_calls_result.is_empty() {
+            info!("✅ No more tool calls, agent loop completed after {} iterations", iteration);
+            break;
+        }
+        
+        info!("🔧 Found {} tool calls in iteration {}", tool_calls_result.len(), iteration);
+        
+        // 4. 解析工具调用
+        let mut tool_calls: Vec<ToolCall> = vec![];
+        for tc in &tool_calls_result {
+            let normalized_tc = normalize_tool_call_format(tc);
+            if let Ok(tool_call) = serde_json::from_value::<ToolCall>(normalized_tc) {
+                tool_calls.push(tool_call);
+            }
+        }
+        
+        // 5. 重复调用检测
+        let current_signatures = compute_tool_signatures(&tool_calls_result);
+        if current_signatures == last_tool_signatures {
+            repeat_count += 1;
+            warn!("⚠️  Detected repeated tool calls (consecutive #{})", repeat_count);
+            
+            if repeat_count >= 2 {
+                warn!("🛑 LLM looping, injecting force-stop nudge");
+                
+                for tc in &tool_calls {
+                    let nudge_msg = ChatMessage {
+                        role: "tool".to_string(),
+                        content: format!(
+                            "[系统提示] 工具 '{}' 已在之前的迭代中成功执行过。请勿重复调用，直接根据已有结果回答。",
+                            tc.name
+                        ),
+                        name: Some(tc.name.clone()),
+                        tool_call_id: Some(tc.id.clone()),
+                    };
+                    ctx_mgr.add_user_message(nudge_msg.content);
+                }
+                
+                ctx_mgr.add_user_message(
+                    "[系统] 你已拥有足够的工具执行结果，请直接回答用户的问题。".to_string()
+                );
+                
+                if repeat_count >= 3 {
+                    warn!("🛑 Force stopping after {} consecutive repeats", repeat_count);
+                    callbacks.emit_chunk(conversation_id, message_id, "", false, true);
+                    break;
+                }
+                
+                last_tool_signatures = vec!["__force_break__".to_string()];
+                continue;
+            }
+        } else {
+            repeat_count = 0;
+            last_tool_signatures = current_signatures;
+        }
+        
+        // 6. 智能并行调度
+        let scheduled = scheduler::schedule_tools(tool_calls);
+        
+        // 7. 执行工具（按类别分组执行）
+        let mut all_results: Vec<(ToolCall, ToolResult)> = vec![];
+        
+        // 7.1 并行执行读取类工具
+        if !scheduled.read_tools.is_empty() {
+            info!("📖 Executing {} read tools in parallel", scheduled.read_tools.len());
+            let mut futures = vec![];
+            for tc in scheduled.read_tools {
+                let cbs = callbacks.clone();
+                let conv_id = conversation_id.to_string();
+                let msg_id = message_id.to_string();
+                
+                cbs.emit_tool_call_start(&conv_id, &msg_id, &tc);
+                
+                let tc_clone = tc.clone();
+                futures.push(async move {
+                    match execute_tool(&tc_clone).await {
+                        Ok(result) => Ok((tc_clone, result)),
+                        Err(e) => {
+                            let fake = ToolResult {
+                                tool_call_id: tc_clone.id.clone(),
+                                output: format!("工具执行失败: {}", e),
+                                success: false,
+                            };
+                            Ok((tc_clone, fake))
+                        }
+                    }
+                });
+            }
+            let results: Vec<std::result::Result<(ToolCall, ToolResult), AppError>> = 
+                futures::future::join_all(futures).await;
+            for r in results {
+                if let Ok((tc, result)) = r {
+                    all_results.push((tc, result));
+                }
+            }
+        }
+        
+        // 7.2 并行执行网络类工具
+        if !scheduled.network_tools.is_empty() {
+            info!("🌐 Executing {} network tools in parallel", scheduled.network_tools.len());
+            let mut futures = vec![];
+            for tc in scheduled.network_tools {
+                let cbs = callbacks.clone();
+                let conv_id = conversation_id.to_string();
+                let msg_id = message_id.to_string();
+                
+                cbs.emit_tool_call_start(&conv_id, &msg_id, &tc);
+                
+                let tc_clone = tc.clone();
+                futures.push(async move {
+                    match execute_tool(&tc_clone).await {
+                        Ok(result) => Ok((tc_clone, result)),
+                        Err(e) => {
+                            let fake = ToolResult {
+                                tool_call_id: tc_clone.id.clone(),
+                                output: format!("工具执行失败: {}", e),
+                                success: false,
+                            };
+                            Ok((tc_clone, fake))
+                        }
+                    }
+                });
+            }
+            let results: Vec<std::result::Result<(ToolCall, ToolResult), AppError>> = 
+                futures::future::join_all(futures).await;
+            for r in results {
+                if let Ok((tc, result)) = r {
+                    all_results.push((tc, result));
+                }
+            }
+        }
+        
+        // 7.3 串行执行写入类工具
+        for tc in scheduled.write_tools {
+            info!("✍️  Executing write tool: {}", tc.name);
+            callbacks.emit_tool_call_start(conversation_id, message_id, &tc);
+            
+            match execute_tool(&tc).await {
+                Ok(result) => all_results.push((tc, result)),
+                Err(e) => {
+                    let fake = ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        output: format!("工具执行失败: {}", e),
+                        success: false,
+                    };
+                    all_results.push((tc, fake));
+                }
+            }
+        }
+        
+        // 7.4 串行执行浏览器类工具
+        for tc in scheduled.browser_tools {
+            info!("🌍 Executing browser tool: {}", tc.name);
+            callbacks.emit_tool_call_start(conversation_id, message_id, &tc);
+            
+            match execute_tool(&tc).await {
+                Ok(result) => all_results.push((tc, result)),
+                Err(e) => {
+                    let fake = ToolResult {
+                        tool_call_id: tc.id.clone(),
+                        output: format!("工具执行失败: {}", e),
+                        success: false,
+                    };
+                    all_results.push((tc, fake));
+                }
+            }
+        }
+        
+        // 8. 添加工具结果到上下文
+        for (tool_call, tool_result) in &all_results {
+            callbacks.emit_tool_result(conversation_id, message_id, tool_call, tool_result);
+            ctx_mgr.add_tool_result(tool_call, tool_result);
+        }
+        
+        // 9. 冻结重要消息
+        ctx_mgr.freeze_important_messages();
+        
+        if iteration >= max_iterations {
+            warn!("⚠️  Reached max iterations, stopping agent loop");
+            callbacks.emit_chunk(conversation_id, message_id, "", false, true);
+            break;
+        }
+    }
+    
+    info!("🏁 Optimized Agent Loop completed after {} iterations", iteration);
+    Ok(())
+}
