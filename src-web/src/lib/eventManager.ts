@@ -3,7 +3,7 @@
  * 用于处理后端和前端之间的双向通信
  */
 
-import { listen, emit } from "@tauri-apps/api/event";
+import { on } from "@/lib/events";
 
 type EventHandler = (payload: any) => void;
 
@@ -56,13 +56,13 @@ class EventManager {
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
       // 监听响应事件
-      const unlisten = listen(responseEventName, (event: any) => {
-        const { id, data, error } = event.payload;
+      const unsubscribe = on(responseEventName, (payload: any) => {
+        const { id, data, error } = payload;
         
         if (id === requestId) {
           clearTimeout(timeout);
           this.pendingRequests.delete(requestId);
-          unlisten.then(fn => fn());
+          unsubscribe();
 
           if (error) {
             reject(new Error(error));
@@ -73,19 +73,23 @@ class EventManager {
       });
 
       // 发送请求
-      emit(eventName, { ...payload, requestId }).catch(reject);
+      if (window.electronAPI) {
+        window.electronAPI.send(eventName, { ...payload, requestId });
+      } else {
+        reject(new Error('Electron API not available'));
+      }
     });
   }
 
   /**
    * 注册事件处理器
    */
-  registerHandler(eventName: string, handler: EventHandler): () => Promise<void> {
-    const unlisten = listen(eventName, (event: any) => {
-      handler(event.payload);
+  registerHandler(eventName: string, handler: EventHandler): () => void {
+    const unsubscribe = on(eventName, (payload: any) => {
+      handler(payload);
     });
 
-    return () => unlisten.then(fn => fn());
+    return unsubscribe;
   }
 
   /**

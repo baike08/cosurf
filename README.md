@@ -1,11 +1,15 @@
-# CoSurf（伴游）- AI Native Desktop Browser
+# CoSurf（伴游）- AI 阅读伴侣
 
 <div align="center">
 
-**一款 AI 原生的桌面浏览器，让浏览更智能**
+**读过的，都算数。**
+
+CoSurf 是你的 AI 阅读伴侣和思考搭档。在你看内容的时候，它帮你理解、记录、关联，把你的阅读行为变成可沉淀的个人知识。
+
+不是阅读器，不是笔记工具，不是搜索引擎。它是你阅读时的**思考搭档**。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tauri](https://img.shields.io/badge/Tauri-2.5-FFC131?logo=tauri)](https://tauri.app/)
+[![Electron](https://img.shields.io/badge/Electron-36-47848F?logo=electron)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://reactjs.org/)
 [![Rust](https://img.shields.io/badge/Rust-1.88-DEA584?logo=rust)](https://www.rust-lang.org/)
 
@@ -15,7 +19,13 @@
 
 ## ✨ 特性
 
-### 🌐 浏览器核心
+### 📚 阅读伴侣核心（读 → 记 → 想 → 决）
+- **读懂** — AI 帮你深度理解网页内容，智能摘要、术语解释、长文拆解
+- **记住** — 自动标注要点，生成记忆卡片，提取关键数据，让知识不流失
+- **想起** — 跨文章关联召回，"我之前读过一篇..." 时快速找到
+- **决策** — 基于阅读历史提供建议，多源信息对比，辅助判断
+
+### 🌐 浏览器能力
 - **WebView2 内核** — 基于 Microsoft Edge WebView2，兼容所有现代网站
 - **多标签页管理** — 支持标签页分组、置顶、拖拽排序
 - **导航历史** — 前进/后退历史栈，快速导航
@@ -24,13 +34,11 @@
 - **下载管理** — 实时进度监控，断点续传
 - **截图工具** — 全屏/选区截图，支持标注
 
-### 🤖 AI 原生能力
+### 🤖 AI 思考搭档
 - **多模型支持** — OpenAI、Anthropic Claude、Google Gemini、智谱、Kimi、DeepSeek、通义千问、Ollama 等
 - **流式对话** — 实时流式响应（SSE），打字机效果，支持思考过程（thinking）展示
-- **智能工具调用** — AI 可自动打开网页、总结页面、操作网页、截图理解、联网搜索
 - **Agent Loop** — 多轮工具调用，自主完成复杂任务（如：打开网页 → 总结内容 → 回答问题）
 - **MCP 协议集成** — 支持 stdio / SSE / Streamable HTTP 三种传输模式，无缝接入 MCP Server
-- **MCP 工具直通** — MCP Server 的工具自动注册为 Agent 可用 function，AI 直接调用
 - **Skills 系统** — 支持导入自定义 Skills（CLI、MCP、脚本），扩展 AI 能力
 - **页面上下文感知** — AI 可感知当前浏览页面，提供精准回答
 - **消息反馈** — 支持对 AI 回复点赞/点踩/复制，反馈持久化到数据库

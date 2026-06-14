@@ -71,6 +71,13 @@ impl Database {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
+        // 先删除相同 URL 的旧记录（URL 去重）
+        self.conn().execute(
+            "DELETE FROM history WHERE url = ?1",
+            params![req.url],
+        )?;
+
+        // 插入新记录
         self.conn().execute(
             "INSERT INTO history (id, title, url, visited_at) VALUES (?1, ?2, ?3, ?4)",
             params![id, req.title, req.url, now],

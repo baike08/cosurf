@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, ToggleLeft, ToggleRight, Code, FolderOpen, FileText, Edit2, Save, Eye } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { skills as skillsApi, db, dialog as dialogApi } from "@/lib/api";
 
 interface Skill {
   id: string;
@@ -41,11 +40,14 @@ export function SkillsSettings() {
   const loadSkills = async () => {
     try {
       setLoading(true);
-      const loaded = await invoke<Skill[]>("list_skills");
-      setSkills(loaded);
+      const loaded = await skillsApi.list();
+      console.log('[SkillsSettings] Loaded skills:', loaded);
+      setSkills(Array.isArray(loaded) ? loaded : []);
       setError(null);
     } catch (err) {
+      console.error('[SkillsSettings] Failed to load skills:', err);
       setError(`Failed to load skills: ${err}`);
+      setSkills([]);
     } finally {
       setLoading(false);
     }
@@ -54,35 +56,41 @@ export function SkillsSettings() {
   // 加载 Skills 目录信息
   const loadSkillDirs = async () => {
     try {
-      const dirs = await invoke<SkillDir[]>("list_skill_files");
-      setSkillDirs(dirs);
+      const dirs = await skillsApi.listFiles();
+      console.log('[SkillsSettings] Loaded skill dirs:', dirs);
+      setSkillDirs(Array.isArray(dirs) ? dirs : []);
     } catch (err) {
       console.error("Failed to load skill directories:", err);
+      setSkillDirs([]);
     }
   };
 
   // 加载 Skills 配置
   const loadSkillsConfig = async () => {
     try {
-      const dir = await invoke<string>("get_skills_directory");
-      setSkillsDirectory(dir);
-      setTempDirectory(dir);
+      const dir = await db.getSkillsDirectory();
+      console.log('[SkillsSettings] Skills directory:', dir);
+      const dirStr = typeof dir === 'string' ? dir : '';
+      setSkillsDirectory(dirStr);
+      setTempDirectory(dirStr);
 
       await loadSkillDirs();
     } catch (err) {
       console.error("Failed to load skills config:", err);
+      setSkillsDirectory('');
+      setTempDirectory('');
     }
   };
 
   // 选择目录
   const selectDirectory = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
+      const result = await dialogApi.openFile({
+        properties: ['openDirectory'],
         title: "选择 Skills 目录"
       });
 
+      const selected = result?.filePaths?.[0];
       if (selected) {
         setTempDirectory(selected as string);
       }
@@ -101,12 +109,17 @@ export function SkillsSettings() {
     try {
       setLoading(true);
       setError(null);
-      await invoke("set_skills_directory", { directory: tempDirectory });
+      
+      // 1. 保存到数据库
+      await db.setSkillsDirectory(tempDirectory);
       setSkillsDirectory(tempDirectory);
       setEditingDirectory(false);
 
-      // 重新加载 Skills
-      await Promise.all([loadSkills(), loadSkillsConfig()]);
+      // 2. 通知 Rust SkillsManager 更新目录并重新加载
+      await skillsApi.setDirectory(tempDirectory);
+      
+      // 3. 重新加载 Skills 列表和目录信息
+      await Promise.all([loadSkills(), loadSkillDirs()]);
     } catch (err) {
       setError(`Failed to save directory: ${err}`);
     } finally {
@@ -124,16 +137,16 @@ export function SkillsSettings() {
   // 从文件夹导入 Skill
   const importFromDirectory = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
+      const result = await dialogApi.openFile({
+        properties: ['openDirectory'],
         title: "选择 Skill 文件夹（需包含 SKILL.md）"
       });
 
+      const selected = result?.filePaths?.[0];
       if (selected) {
         setLoading(true);
         setError(null);
-        await invoke("import_skill_from_directory", { sourceDir: selected });
+        await skillsApi.importDirectory(selected);
         await Promise.all([loadSkills(), loadSkillsConfig()]);
       }
     } catch (err) {
@@ -147,7 +160,7 @@ export function SkillsSettings() {
   const importFromMarkdown = async () => {
     try {
       setLoading(true);
-      await invoke("import_skill_from_markdown", { markdownContent });
+      await skillsApi.importMarkdown(markdownContent);
       setShowImportModal(false);
       setMarkdownContent("");
       await Promise.all([loadSkills(), loadSkillsConfig()]);
@@ -164,7 +177,7 @@ export function SkillsSettings() {
     try {
       setLoadingPreview(true);
       setPreviewSkillId(skillId);
-      const content = await invoke<string>("get_skill_content", { skillId });
+      const content = await skillsApi.getContent(skillId);
       setPreviewContent(content);
     } catch (err) {
       setPreviewContent(`Error loading skill content: ${err}`);
@@ -185,7 +198,7 @@ export function SkillsSettings() {
 
     try {
       setLoading(true);
-      await invoke("delete_skill", { skillId: id });
+      await skillsApi.delete(id);
       await Promise.all([loadSkills(), loadSkillDirs()]);
       setError(null);
     } catch (err) {
@@ -199,7 +212,7 @@ export function SkillsSettings() {
   const toggleSkill = async (id: string, enabled: boolean) => {
     try {
       setLoading(true);
-      await invoke("toggle_skill", { request: { skill_id: id, enabled } });
+      await skillsApi.toggle(id, enabled);
       await loadSkills();
       setError(null);
     } catch (err) {
@@ -302,7 +315,7 @@ export function SkillsSettings() {
                   <span className="font-mono font-medium">{dir.id}/</span>
                   <FileText className="w-3 h-3 text-gray-400" />
                   <span className="text-content-secondary">SKILL.md</span>
-                  <span className="text-content-secondary">({(dir.file_size / 1024).toFixed(1)} KB)</span>
+                  <span className="text-content-secondary">({(Number(dir.file_size) / 1024).toFixed(1)} KB)</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {dir.modified && (
@@ -381,9 +394,9 @@ export function SkillsSettings() {
                   </p>
                   {skill.tags.length > 0 && (
                     <div className="flex gap-1 mt-2">
-                      {skill.tags.map((tag) => (
+                      {skill.tags.map((tag, index) => (
                         <span
-                          key={tag}
+                          key={`${skill.id}-tag-${index}`}
                           className="px-1.5 py-0.5 text-xs bg-surface-active rounded"
                         >
                           {tag}

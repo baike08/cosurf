@@ -1,21 +1,7 @@
 import { create } from "zustand";
 import type { AppSettings, ModelConfig, ThemeMode, Language } from "@cosurf/shared";
 import { DEFAULT_SETTINGS } from "@cosurf/shared";
-import { invoke } from "@/lib/tauri";
-
-interface BackendModelConfig {
-  id: string;
-  name: string;
-  provider: string;
-  modelId: string;
-  apiKey?: string;
-  baseUrl?: string;
-  temperature: number;
-  topP: number;
-  maxTokens: number;
-  isLocal: boolean;
-  isActive: boolean;
-}
+import { db } from "@/lib/api";
 
 interface SettingsState {
   settings: AppSettings;
@@ -55,8 +41,8 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   loadModels: async () => {
     try {
       set({ isLoading: true });
-      const models = await invoke<BackendModelConfig[]>("list_model_configs");
-      const activeModel = await invoke<BackendModelConfig | null>("get_active_model");
+      const models = await db.listModelConfigs();
+      const activeModel = await db.getActiveModel();
       
       set({
         models: models as ModelConfig[],
@@ -88,19 +74,14 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   updateSettings: async (partial) => {
-    // 先更新前端状态
     set((state) => ({
       settings: { ...state.settings, ...partial },
     }));
     
-    // 然后保存到后端数据库
     try {
       for (const [key, value] of Object.entries(partial)) {
         if (value !== undefined && value !== null) {
-          await invoke("set_setting", { 
-            key, 
-            value: String(value) 
-          });
+          await db.setSetting(key, String(value));
         }
       }
     } catch (error) {
@@ -110,7 +91,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   setActiveModel: async (id) => {
     try {
-      await invoke("set_active_model", { id });
+      await db.setActiveModel(id);
       set({ activeModelId: id });
     } catch (error) {
       console.error("Failed to set active model:", error);
@@ -119,18 +100,16 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   addModel: async (modelData) => {
     try {
-      const newModel = await invoke<BackendModelConfig>("create_model_config", {
-        request: {
-          name: modelData.name,
-          provider: modelData.provider,
-          modelId: modelData.modelId,
-          apiKey: modelData.apiKey,
-          baseUrl: modelData.baseUrl,
-          temperature: modelData.temperature,
-          topP: modelData.topP,
-          maxTokens: modelData.maxTokens,
-          isLocal: modelData.isLocal,
-        },
+      const newModel = await db.createModelConfig({
+        name: modelData.name,
+        provider: modelData.provider,
+        modelId: modelData.modelId,
+        apiKey: modelData.apiKey,
+        baseUrl: modelData.baseUrl,
+        temperature: modelData.temperature,
+        topP: modelData.topP,
+        maxTokens: modelData.maxTokens,
+        isLocal: modelData.isLocal,
       });
       
       set((state) => ({
@@ -144,7 +123,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   removeModel: async (id) => {
     try {
-      await invoke("delete_model_config", { id });
+      await db.deleteModelConfig(id);
       set((state) => ({
         models: state.models.filter((m) => m.id !== id),
         activeModelId:
@@ -159,16 +138,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 
   updateModel: async (id, updates) => {
     try {
-      const updatedModel = await invoke<BackendModelConfig>("update_model_config", {
-        id,
-        request: {
-          name: updates.name,
-          apiKey: updates.apiKey,
-          baseUrl: updates.baseUrl,
-          temperature: updates.temperature,
-          topP: updates.topP,
-          maxTokens: updates.maxTokens,
-        },
+      const updatedModel = await db.updateModelConfig(id, {
+        name: updates.name,
+        apiKey: updates.apiKey,
+        baseUrl: updates.baseUrl,
+        temperature: updates.temperature,
+        topP: updates.topP,
+        maxTokens: updates.maxTokens,
       });
       
       set((state) => ({
@@ -182,52 +158,41 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }
   },
 
-  // 加载 Skills 目录配置
   loadSkillsDirectory: async () => {
     try {
-      console.log('[loadSkillsDirectory] Loading skills directory...');
-      const skillsDir = await invoke<string>("get_skills_directory");
-      console.log('[loadSkillsDirectory] Skills directory:', skillsDir);
-      
-      set({ skillsDirectory: skillsDir });
-      console.log('[loadSkillsDirectory] Directory loaded successfully');
+      console.log('[SettingsStore] Loading skills directory...');
+      const skillsDir = await db.getSkillsDirectory();
+      console.log('[SettingsStore] Skills directory loaded:', skillsDir);
+      set({ skillsDirectory: skillsDir || "" });
     } catch (error) {
       console.error("Failed to load skills directory:", error);
     }
   },
 
-  // 加载 IQS API Key
   loadIqsApiKey: async () => {
     try {
-      console.log('[loadIqsApiKey] Loading IQS API Key...');
-      const iqsKey = await invoke<string | null>("get_iqs_api_key");
-      console.log('[loadIqsApiKey] IQS API Key loaded:', iqsKey ? '***' + iqsKey.slice(-4) : 'null');
-      
+      console.log('[SettingsStore] Loading IQS API key...');
+      const iqsKey = await db.getIqsApiKey();
+      console.log('[SettingsStore] IQS API key loaded:', iqsKey ? '***' + iqsKey.slice(-4) : 'null');
       set({ iqsApiKey: iqsKey || "" });
-      console.log('[loadIqsApiKey] API Key loaded successfully');
     } catch (error) {
       console.error("Failed to load IQS API key:", error);
     }
   },
 
-  // 设置 Skills 目录
   setSkillsDirectory: async (directory) => {
     try {
-      await invoke("set_skills_directory", { directory });
+      await db.setSkillsDirectory(directory);
       set({ skillsDirectory: directory });
     } catch (error) {
       console.error("Failed to set skills directory:", error);
     }
   },
 
-  // 设置 IQS API Key
   setIqsApiKey: async (apiKey) => {
     try {
-      console.log('[setIqsApiKey] Setting IQS API Key, length:', apiKey.length);
-      await invoke("set_iqs_api_key", { apiKey });
-      console.log('[setIqsApiKey] API Key saved to database');
+      await db.setIqsApiKey(apiKey);
       set({ iqsApiKey: apiKey });
-      console.log('[setIqsApiKey] Store updated');
     } catch (error) {
       console.error("Failed to set IQS API key:", error);
     }

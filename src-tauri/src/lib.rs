@@ -75,7 +75,7 @@ pub fn run() {
             // 注册全局截图快捷键 Ctrl+Shift+X
             info!("Registering global screenshot shortcut: Control+Shift+X");
             let shortcut_handle = app.handle().clone();
-            app.global_shortcut().on_shortcut("Control+Shift+X", move |_app, _shortcut, event| {
+            match app.global_shortcut().on_shortcut("Control+Shift+X", move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     // 发送事件到前端，触发全屏截图
                     let h = shortcut_handle.clone();
@@ -85,8 +85,12 @@ pub fn run() {
                         }
                     });
                 }
-            }).map_err(|e| format!("Failed to register screenshot shortcut: {}", e))?;
-            info!("Global shortcut Control+Shift+X registered successfully for screenshot");
+            }) {
+                Ok(_) => info!("Global shortcut Control+Shift+X registered successfully for screenshot"),
+                Err(e) => {
+                    tracing::warn!("Failed to register screenshot shortcut (may be already registered): {}", e);
+                }
+            }
 
             // 自动更新检查
             #[cfg(feature = "updater")]

@@ -45,6 +45,13 @@ pnpm-debug.log*
 src-tauri/gen/
 src-tauri/capabilities/default.json.bak
 
+# Electron
+out/
+dist_electron/
+electron/dist/
+native/*.node
+native/target/
+
 # Misc
 .turbo/
 .vite/

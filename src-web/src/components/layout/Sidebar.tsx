@@ -7,14 +7,12 @@ import {
   Trash2,
   Plus,
   Download,
-  Layers,
 } from "lucide-react";
 import { useUIStore, type SidebarPanel } from "@/stores/uiStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { cn, truncate } from "@/lib/utils";
 import { IconButton } from "@/components/ui/IconButton";
 import { DownloadsPanel } from "@/components/sidebar/DownloadsPanel";
-import { TabsPanel } from "@/components/sidebar/TabsPanel";
 import { HistoryPanel } from "@/components/sidebar/HistoryPanel";
 import { BookmarksPanel } from "@/components/sidebar/BookmarksPanel";
 
@@ -23,7 +21,6 @@ const panelConfig: Record<Exclude<SidebarPanel, "none">, { icon: typeof Bookmark
   history: { icon: History, label: "历史记录" },
   conversations: { icon: MessageSquare, label: "对话历史" },
   downloads: { icon: Download, label: "下载" },
-  tabs: { icon: Layers, label: "标签管理" },
 };
 
 export function Sidebar() {
@@ -57,7 +54,6 @@ export function Sidebar() {
         {sidebarPanel === "history" && <HistoryPanel />}
         {sidebarPanel === "conversations" && <ConversationPanel />}
         {sidebarPanel === "downloads" && <DownloadsPanel />}
-        {sidebarPanel === "tabs" && <TabsPanel />}
       </div>
     </div>
   );

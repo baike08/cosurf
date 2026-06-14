@@ -1,23 +1,19 @@
+/**
+ * @deprecated This module is no longer used.
+ * All IPC communication has been migrated to Electron.
+ * See: @/lib/api.ts, @/lib/events.ts, @/lib/electronBridge.ts
+ */
 export function isTauri(): boolean {
-  return "__TAURI_INTERNALS__" in window;
+  return false;
 }
 
-export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri()) {
-    const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
-    return tauriInvoke<T>(cmd, args);
-  }
-  throw new Error(`Tauri not available, command: ${cmd}`);
+export async function invoke<T>(_cmd: string, _args?: Record<string, unknown>): Promise<T> {
+  throw new Error('Tauri is no longer supported. Use Electron IPC instead.');
 }
 
 export async function listen<T>(
-  event: string,
-  handler: (payload: T) => void,
+  _event: string,
+  _handler: (payload: T) => void,
 ): Promise<() => void> {
-  if (isTauri()) {
-    const { listen: tauriListen } = await import("@tauri-apps/api/event");
-    const unlisten = await tauriListen<T>(event, (e) => handler(e.payload));
-    return unlisten;
-  }
   return () => {};
 }

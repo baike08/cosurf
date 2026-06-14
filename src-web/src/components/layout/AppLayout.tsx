@@ -12,7 +12,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useTabStore } from "@/stores/tabStore";
 import { useEffect, useRef, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { on } from "@/lib/events";
 
 export function AppLayout() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
@@ -115,46 +115,37 @@ export function AppLayout() {
       }
     }, 30000);
     
-    const unlisten = listen<{ requestId: string; url: string; title: string }>(
+    const unlisten = on<{ requestId: string; url: string; title: string }>(
       'webview:create-tab',
-      async (event) => {
-        const { requestId, url, title } = event.payload;
-        console.log('[AppLayout] 📥 Received create-tab request:', { requestId, url, title });
+      async (payload) => {
+        const { requestId, url, title } = payload;
         
         // 检查是否是重复请求（相同的 URL 在 2 秒内）
         const now = Date.now();
         const lastRequestTime = recentRequests.current.get(url);
         if (lastRequestTime && now - lastRequestTime < 2000) {
-          console.log('[AppLayout] ⚠️ Duplicate request detected, ignoring:', url, `(last: ${now - lastRequestTime}ms ago)`);
           return;
         }
         recentRequests.current.set(url, now);
         
         try {
-          // 创建新标签页（addTab 内部已经设置为 active 并聚焦）
           const addTab = useTabStore.getState().addTab;
           const newTabId = addTab(url, title);
-          console.log('[AppLayout] ✅ New tab created:', { newTabId, url, title });
-          
-          // 【移除重复调用】addTab 已经调用了 set_active_tab
-          // 不需要再次调用 invoke('set_active_tab')
           
           // 通知后端新标签页 ID
-          const { emit } = await import('@tauri-apps/api/event');
-          await emit('cosurf:new-tab-response', {
+          window.electronAPI?.send('cosurf:new-tab-response', {
             requestId,
             tabId: newTabId
           });
-          console.log('[AppLayout] 📤 Sent new-tab-response');
         } catch (error) {
-          console.error('[AppLayout] ❌ Failed to create tab:', error);
+          console.error('[AppLayout] Failed to create tab:', error);
         }
       }
     );
     
     return () => {
       clearInterval(cleanupInterval);
-      unlisten.then(fn => fn());
+      unlisten();
     };
   }, []);
 

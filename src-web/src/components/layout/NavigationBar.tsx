@@ -15,7 +15,6 @@ import {
   MessageSquare,
   MousePointer2,
   Wrench,
-  Layers,
   Minus,
   Square,
   X,
@@ -27,7 +26,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn, getDomain } from "@/lib/utils";
 import { isToolUrl, parseToolUrl } from "@/components/tools/ToolPage";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { win } from "@/lib/api";
 
 export function NavigationBar() {
   // 【关键修复】分别订阅 tabs 和 activeTabId，避免对象引用导致的无限循环
@@ -92,17 +91,6 @@ export function NavigationBar() {
     return () => window.removeEventListener('cosurf:focus-address-bar', handleFocusAddressBar);
   }, []);
 
-  // 调试日志：检查导航栏的状态
-  useEffect(() => {
-    console.log('[NavigationBar] 📊 State:', {
-      activeTabId,
-      tabCount: tabs.length,
-      activeTabUrl: activeTab?.url,
-      activeTabTitle: activeTab?.title,
-      urlInput,
-      hasActiveTab: !!activeTab
-    });
-  }, [activeTabId, tabs, activeTab?.url, activeTab?.title, urlInput]);
 
   // 计算是否可以后退/前进
   const canGoBack = activeTabId ? useTabStore.getState().canGoBack(activeTabId) : false;
@@ -196,19 +184,19 @@ export function NavigationBar() {
 
   // 窗口控制
   const handleMinimize = useCallback(async () => {
-    try { await getCurrentWindow().minimize(); } catch (e) { console.error('Failed to minimize:', e); }
+    try { await win.minimize(); } catch (e) { console.error('Failed to minimize:', e); }
   }, []);
 
   const handleMaximize = useCallback(async () => {
     try {
-      const win = getCurrentWindow();
-      if (await win.isMaximized()) { await win.unmaximize(); } 
+      const maximized = await win.isMaximized();
+      if (maximized) { await win.maximize(); } 
       else { await win.maximize(); }
     } catch (e) { console.error('Failed to maximize:', e); }
   }, []);
 
   const handleClose = useCallback(async () => {
-    try { await getCurrentWindow().close(); } catch (e) { console.error('Failed to close:', e); }
+    try { await win.close(); } catch (e) { console.error('Failed to close:', e); }
   }, []);
 
   return (
@@ -299,15 +287,6 @@ export function NavigationBar() {
 
       {/* 右侧工具按钮 */}
       <div className="flex items-center gap-0.5 no-drag">
-        <Tooltip label="标签管理">
-          <IconButton
-            size="sm"
-            active={useUIStore.getState().sidebarPanel === "tabs" && useUIStore.getState().sidebarOpen}
-            onClick={() => setSidebarPanel("tabs")}
-          >
-            <Layers />
-          </IconButton>
-        </Tooltip>
         <Tooltip label="工具箱">
           <IconButton
             size="sm"

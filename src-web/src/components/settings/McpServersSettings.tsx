@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Trash2, Edit2, X, TestTube, Loader2, Upload, Play, Power, PowerOff, Server } from "lucide-react";
+import { db } from '@/lib/api';
+import { mcp } from '@/lib/api';
+import { Trash2, Edit2, X, TestTube, Loader2, Upload, Play, Power, PowerOff, Server, RefreshCw } from "lucide-react";
 import Editor from "@monaco-editor/react";
 
 // Tauri 错误返回 { code, message } 对象，需要提取 message
@@ -93,7 +94,7 @@ export function McpServersSettings() {
   const [editError, setEditError] = useState<string | null>(null);
 
   // Test
-  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, ToolInfo[]>>({});
   const [testErrors, setTestErrors] = useState<Record<string, string>>({});
 
@@ -105,8 +106,15 @@ export function McpServersSettings() {
     try {
       setLoading(true);
       setError(null);
-      const servers = await invoke<McpServerConfig[]>("list_mcp_servers");
+      const servers = await db.listMcpServers();
       setMcpServers(servers);
+      
+      // 通知 Native 模块加载所有启用的 MCP Servers
+      const enabledServers = servers.filter(s => s.enabled);
+      if (enabledServers.length > 0) {
+        console.log(`[MCP] Loading ${enabledServers.length} enabled servers...`);
+        await mcp.loadServers(enabledServers);
+      }
     } catch (err) {
       setError(`Failed to load MCP servers: ${getErrorMessage(err)}`);
     } finally {
@@ -117,6 +125,63 @@ export function McpServersSettings() {
   useEffect(() => {
     loadMcpServers();
   }, [loadMcpServers]);
+
+  // 当 MCP Servers 加载完成后，自动为每个启用的 server 加载工具列表
+  useEffect(() => {
+    if (mcpServers.length > 0) {
+      mcpServers.forEach(server => {
+        // 只为启用的且尚未加载过工具列表的 server 加载
+        if (server.enabled && !(server.id in testResults)) {
+          console.log(`[MCP] Auto-loading tools for server: ${server.name}`);
+          // 异步加载工具列表，不阻塞 UI
+          const loadTools = async () => {
+            try {
+              setTestingIds(prev => new Set(prev).add(server.id));
+              
+              const result = await db.testMcpServer({
+                serverType: server.serverType,
+                url: isHttpType(server.serverType) ? (server.url || "") : null,
+                command: server.command || null,
+                args: server.args || null,
+                env: server.env || null,
+                apiKey: null, // 不需要额外传递 apiKey，API Key 已经在 headers 中
+                headers: server.headers || null,
+              });
+              console.log(`[MCP] Raw test result for ${server.name}:`, typeof result, result);
+              
+              // 后端返回的是 JSON 字符串，需要解析
+              let parsedResult;
+              if (typeof result === 'string') {
+                try {
+                  parsedResult = JSON.parse(result);
+                  console.log(`[MCP] Parsed result:`, parsedResult);
+                } catch (e) {
+                  console.error(`[MCP] Failed to parse result:`, e);
+                  throw new Error(`Failed to parse MCP test result: ${e}`);
+                }
+              } else {
+                parsedResult = result;
+              }
+              
+              const tools = parsedResult.tools || [];
+              console.log(`[MCP] Extracted ${tools.length} tools for server: ${server.name}`);
+              setTestResults(prev => ({ ...prev, [server.id]: tools }));
+            } catch (err) {
+              console.warn(`Failed to load tools for server ${server.name}:`, err);
+              setTestErrors(prev => ({ ...prev, [server.id]: getErrorMessage(err) }));
+            } finally {
+              setTestingIds(prev => {
+                const next = new Set(prev);
+                next.delete(server.id);
+                return next;
+              });
+            }
+          };
+          loadTools();
+        }
+      });
+    }
+  }, [mcpServers]);
 
   // 判断是否为 HTTP 类型（需要 URL 的类型）
   const isHttpType = (serverType: string) => {
@@ -160,9 +225,7 @@ export function McpServersSettings() {
     try {
       setImportError(null);
       setLoading(true);
-      await invoke<McpServerConfig[]>("import_mcp_servers_from_json", {
-        jsonContent: importJson,
-      });
+      await db.importMcpServersFromJson(importJson);
       setShowImportDialog(false);
       setImportJson("");
       await loadMcpServers();
@@ -201,10 +264,7 @@ export function McpServersSettings() {
         enabled: !(parsed.disabled ?? false),
       };
 
-      await invoke("update_mcp_server", {
-        id: editingServer.id,
-        request,
-      });
+      await db.updateMcpServer(editingServer.id, request);
 
       setEditingServer(null);
       setEditJson("");
@@ -219,10 +279,7 @@ export function McpServersSettings() {
     setTogglingId(server.id);
     try {
       const newEnabled = !server.enabled;
-      await invoke("update_mcp_server", {
-        id: server.id,
-        request: { enabled: newEnabled, disabled: !newEnabled },
-      });
+      await db.updateMcpServer(server.id, { enabled: newEnabled, disabled: !newEnabled });
       await loadMcpServers();
     } catch (err) {
       setError(`Toggle failed: ${getErrorMessage(err)}`);
@@ -233,27 +290,50 @@ export function McpServersSettings() {
 
   // 测试
   const handleTest = async (server: McpServerConfig) => {
-    setTestingId(server.id);
+    console.log(`[MCP] Testing server: ${server.name}`);
+    setTestingIds(prev => new Set(prev).add(server.id));
     setError(null);
     setTestErrors(prev => { const next = { ...prev }; delete next[server.id]; return next; });
 
     try {
-      const result = await invoke<{ tools?: ToolInfo[] }>("test_mcp_server", {
+      const result = await db.testMcpServer({
         serverType: server.serverType,
-        serverUrl: isHttpType(server.serverType) ? (server.url || "") : null,
+        url: isHttpType(server.serverType) ? (server.url || "") : null,
         command: server.command || null,
         args: server.args || null,
         env: server.env || null,
-        apiKey: null,
+        apiKey: null, // 不需要额外传递 apiKey，API Key 已经在 headers 中
         headers: server.headers || null,
       });
 
-      const tools = result.tools || [];
+      console.log(`[MCP] Raw test result for ${server.name}:`, typeof result, result);
+      
+      // 后端返回的是 JSON 字符串，需要解析
+      let parsedResult;
+      if (typeof result === 'string') {
+        try {
+          parsedResult = JSON.parse(result);
+          console.log(`[MCP] Parsed result:`, parsedResult);
+        } catch (e) {
+          console.error(`[MCP] Failed to parse result:`, e);
+          throw new Error(`Failed to parse MCP test result: ${e}`);
+        }
+      } else {
+        parsedResult = result;
+      }
+      
+      const tools = parsedResult.tools || [];
+      console.log(`[MCP] Test completed for ${server.name}: ${tools.length} tools`);
       setTestResults(prev => ({ ...prev, [server.id]: tools }));
     } catch (err) {
+      console.error(`[MCP] Test failed for ${server.name}:`, err);
       setTestErrors(prev => ({ ...prev, [server.id]: getErrorMessage(err) }));
     } finally {
-      setTestingId(null);
+      setTestingIds(prev => {
+        const next = new Set(prev);
+        next.delete(server.id);
+        return next;
+      });
     }
   };
 
@@ -262,7 +342,7 @@ export function McpServersSettings() {
     if (!confirm("确定要删除这个 MCP Server 吗？")) return;
     try {
       setError(null);
-      await invoke("delete_mcp_server", { id });
+      await db.deleteMcpServer(id);
       setTestResults(prev => { const next = { ...prev }; delete next[id]; return next; });
       setTestErrors(prev => { const next = { ...prev }; delete next[id]; return next; });
       await loadMcpServers();
@@ -523,17 +603,17 @@ export function McpServersSettings() {
                     )}
                   </button>
 
-                  {/* Test */}
+                  {/* Test / Refresh Tools */}
                   <button
                     onClick={() => handleTest(server)}
-                    disabled={testingId === server.id || !server.enabled}
+                    disabled={testingIds.has(server.id) || !server.enabled}
                     className="p-1.5 hover:bg-blue-500/10 rounded text-blue-600 dark:text-blue-400 disabled:opacity-40"
-                    title="测试连接"
+                    title={testResults[server.id] ? "刷新工具列表" : "测试连接"}
                   >
-                    {testingId === server.id ? (
+                    {testingIds.has(server.id) ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <TestTube className="w-3.5 h-3.5" />
+                      <RefreshCw className="w-3.5 h-3.5" />
                     )}
                   </button>
 

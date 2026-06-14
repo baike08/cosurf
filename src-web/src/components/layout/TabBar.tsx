@@ -11,13 +11,6 @@ export function TabBar() {
   const closeTab = useTabStore((s) => s.closeTab);
   const addTab = useTabStore((s) => s.addTab);
 
-  // 调试日志：检查 TabBar 的状态
-  console.log('[TabBar] 📊 Rendering:', {
-    tabCount: tabs.length,
-    activeTabId,
-    tabs: tabs.map(t => ({ id: t.id, title: t.title, isActive: t.isActive }))
-  });
-
   return (
     <div className="h-tab-bar flex items-end bg-surface-secondary border-b border-border drag-region select-none">
       <div className="flex items-end flex-1 overflow-x-auto no-drag px-1 pt-1 gap-px">
@@ -75,11 +68,7 @@ export function TabBar() {
       <div className="flex items-center gap-0.5 px-1.5 pb-1.5 no-drag">
         <IconButton 
           size="sm" 
-          onClick={() => {
-            console.log('[TabBar] ➕ Plus button clicked, calling addTab()');
-            const newTabId = addTab();
-            console.log('[TabBar] ✅ addTab() returned:', newTabId);
-          }}
+          onClick={() => addTab()}
         >
           <Plus />
         </IconButton>

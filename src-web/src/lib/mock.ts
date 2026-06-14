@@ -69,8 +69,8 @@ export const mockMessages: Message[] = [
       {
         id: "att-1",
         type: "webpage",
-        name: "CoSurf - AI Smart Browser",
-        content: "CoSurf 是一款内置 AI 助手的智能浏览器...",
+        name: "CoSurf - AI 阅读伴侣",
+        content: "CoSurf 是你的 AI 阅读伴侣和思考搭档...",
       },
     ],
     createdAt: now,
@@ -82,7 +82,7 @@ export const mockMessages: Message[] = [
     conversationId: "conv-1",
     role: "assistant",
     content:
-      "## 页面总结\n\n这是 **CoSurf** 的官方网站，一款内置 AI 助手的智能浏览器。主要特点包括：\n\n1. **内置 AI 对话** — 无需切换窗口，直接在浏览器中与 AI 对话\n2. **网页智能总结** — 一键提取网页核心内容\n3. **多模型支持** — 支持 OpenAI、Claude、本地模型等\n4. **工具系统** — 可扩展的 AI 工具生态\n\n> 这是一个开源项目，基于 Tauri + React 构建。",
+      "## 页面总结\n\n这是 **CoSurf** 的官方网站，你的 AI 阅读伴侣和思考搭档。主要特点包括：\n\n1. **读懂** — AI 帮你深度理解网页内容，提取关键信息\n2. **记住** — 自动标注要点，生成记忆卡片，让知识不流失\n3. **想起** — 跨文章关联召回，快速找回之前读过的内容\n4. **决策** — 基于阅读历史提供建议，辅助判断\n\n> 读过的，都算数。这不是一个工具，而是你阅读时的思考伙伴。",
     thinkingContent: "",
     status: "complete",
     attachments: [],
@@ -107,7 +107,7 @@ export const mockMessages: Message[] = [
     conversationId: "conv-1",
     role: "assistant",
     content:
-      "CoSurf 相比普通浏览器的核心优势：\n\n### 🧠 AI 原生集成\n- 浏览网页时可随时调用 AI 分析、总结、翻译\n- AI 能理解当前页面上下文，提供更精准的回答\n\n### 🛠️ 自动化操作\n- 通过网页操作 Agent，AI 可以自动点击、填表、滚动\n- 支持自定义工作流\n\n### 🔒 隐私保护\n- 支持本地模型（Ollama），数据不出本机\n- 可控的数据分享设置",
+      "CoSurf 相比普通浏览器的核心价值：\n\n### 🧠 思考搭档，不是工具\n- 在你看内容时，它帮你理解、记录、关联\n- 把阅读行为变成可沉淀的个人知识\n\n### 📚 读 → 记 → 想 → 决\n- **读懂**：智能摘要、术语解释、长文拆解\n- **记住**：自动生成记忆卡片，不用动手\n- **想起**：\"我之前读过一篇...\" 时快速召回\n- **决策**：基于阅读历史，多源信息对比\n\n### 💡 读过的，都算数\n- 解决 \"读了白读，看完就忘\" 的痛点\n- 每一次阅读都不白费",
     thinkingContent: "",
     status: "streaming",
     attachments: [],
@@ -156,7 +156,7 @@ export const mockBookmarks: Bookmark[] = [
 ];
 
 export const mockHistory: HistoryEntry[] = [
-  { id: "h-1", title: "CoSurf - AI 智能浏览器", url: "https://cosurf.dev", visitedAt: now },
+  { id: "h-1", title: "CoSurf - AI 阅读伴侣", url: "https://cosurf.dev", visitedAt: now },
   { id: "h-2", title: "React 官方文档", url: "https://react.dev/learn", visitedAt: now },
   { id: "h-3", title: "Tauri 应用框架", url: "https://tauri.app/start/", visitedAt: now },
   { id: "h-4", title: "Zustand 状态管理", url: "https://github.com/pmndrs/zustand", visitedAt: now },

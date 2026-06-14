@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { page as pageApi } from "@/lib/api";
+import { on } from "@/lib/events";
 
 /**
  * 页面内容提取结果
@@ -21,8 +21,8 @@ export interface WebActionResult {
  * 监听页面内容返回事件
  */
 export function onPageContent(callback: (result: PageContentResult) => void) {
-  return listen("cosurf:page-content", (event: any) => {
-    callback(event.payload as PageContentResult);
+  return on<PageContentResult>("cosurf:page-content", (payload) => {
+    callback(payload);
   });
 }
 
@@ -30,20 +30,17 @@ export function onPageContent(callback: (result: PageContentResult) => void) {
  * 监听页面内容提取错误事件
  */
 export function onPageContentError(callback: (error: { tabId: string; error: string }) => void) {
-  return listen("cosurf:page-content-error", (event: any) => {
-    callback(event.payload);
+  return on<{ tabId: string; error: string }>("cosurf:page-content-error", (payload) => {
+    callback(payload);
   });
 }
 
 /**
  * 智能总结当前页面
  */
-export async function summarizeCurrentPage(tabId: string, maxLength?: number): Promise<string> {
+export async function summarizeCurrentPage(tabId: string, _maxLength?: number): Promise<string> {
   try {
-    const result = await invoke<string>("summarize_page", {
-      tabId,
-      maxLength,
-    });
+    const result = await pageApi.summarize(tabId);
     return result;
   } catch (error) {
     console.error("[Tool] Summarize page failed:", error);
@@ -61,12 +58,7 @@ export async function executeWebAction(
   value?: string
 ): Promise<WebActionResult> {
   try {
-    const result = await invoke<string>("execute_web_action", {
-      tabId,
-      action,
-      selector,
-      value,
-    });
+    const result = await pageApi.executeAction(tabId, action, selector, value);
     
     return {
       success: true,

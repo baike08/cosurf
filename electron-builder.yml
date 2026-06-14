@@ -1,0 +1,73 @@
+# Electron Builder 配置
+# 用于将 CoSurf 打包为可安装程序 (Windows MSI/NSIS, macOS DMG, Linux AppImage)
+
+appId: com.cosurf.app
+productName: CoSurf
+copyright: Copyright © 2024 CoSurf Team
+
+directories:
+  buildResources: build
+  output: dist_electron
+
+files:
+  - out/**/*
+  - "!node_modules/**/*"
+
+extraResources:
+  # 打包 Rust 编译的 .node 原生模块
+  - from: native/cosurf-native.${platform}-${arch}.node
+    to: native/cosurf-native.node
+    filter:
+      - "**/*.node"
+
+win:
+  icon: src-tauri/icons/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: msi
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-${arch}-setup.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: src-tauri/icons/icon.ico
+  uninstallerIcon: src-tauri/icons/icon.ico
+  installerHeaderIcon: src-tauri/icons/icon.ico
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: CoSurf
+  language: 2052  # Simplified Chinese
+  displayLanguageSelector: true
+
+msi:
+  upgradeCode: "{C05URF-0001-0001-0001-000000000001}"
+
+mac:
+  icon: src-tauri/icons/icon.icns
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+linux:
+  icon: src-tauri/icons
+  category: Network
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+
+publish:
+  provider: github
+  owner: cosurf
+  repo: cosurf

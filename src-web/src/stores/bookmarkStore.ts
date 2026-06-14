@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { db } from "@/lib/api";
 
 interface Bookmark {
   id: string;
@@ -49,9 +49,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
     set({ loading: true });
     try {
       const fid = folderId !== undefined ? folderId : get().currentFolderId;
-      const bookmarks = await invoke<Bookmark[]>("list_bookmarks", {
-        folderId: fid || null,
-      });
+      const bookmarks = await db.listBookmarks(fid || null);
       set({ bookmarks, loading: false });
     } catch (error) {
       console.error("[BookmarkStore] Failed to load bookmarks:", error);
@@ -61,9 +59,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   loadFolders: async () => {
     try {
-      const folders = await invoke<BookmarkFolder[]>("list_bookmark_folders", {
-        parentId: null,
-      });
+      const folders = await db.listBookmarkFolders(null);
       set({ folders });
     } catch (error) {
       console.error("[BookmarkStore] Failed to load folders:", error);
@@ -81,14 +77,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   addBookmark: async (title, url, favicon, folderId) => {
     try {
-      const bookmark = await invoke<Bookmark>("create_bookmark", {
-        request: {
-          title,
-          url,
-          favicon: favicon || null,
-          folderId: folderId || null,
-        },
-      });
+      const bookmark = await db.createBookmark(title, url, favicon || null, folderId || null);
       // 重新加载当前文件夹的书签
       await get().loadBookmarks();
       return bookmark;
@@ -100,7 +89,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   deleteBookmark: async (id) => {
     try {
-      await invoke("delete_bookmark", { id });
+      await db.deleteBookmark(id);
       set((state) => ({
         bookmarks: state.bookmarks.filter((b) => b.id !== id),
       }));
@@ -111,12 +100,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   addFolder: async (name, parentId) => {
     try {
-      const folder = await invoke<BookmarkFolder>("create_bookmark_folder", {
-        request: {
-          name,
-          parentId: parentId || null,
-        },
-      });
+      const folder = await db.createBookmarkFolder(name, parentId || null);
       await get().loadFolders();
       return folder;
     } catch (error) {
@@ -127,7 +111,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   deleteFolder: async (id) => {
     try {
-      await invoke("delete_bookmark_folder", { id });
+      await db.deleteBookmarkFolder(id);
       set((state) => ({
         folders: state.folders.filter((f) => f.id !== id),
       }));

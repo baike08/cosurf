@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Sparkles, AlertTriangle, RefreshCw, ExternalLink, Lock, Globe } from "lucide-react";
 import { useTabStore } from "@/stores/tabStore";
 import { getDomain } from "@/lib/utils";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, emit } from "@tauri-apps/api/event";
+import { tab as tabApi, shell as shellApi } from "@/lib/api";
+import { on } from "@/lib/events";
 import { ToolPage, parseToolUrl, isToolUrl } from "@/components/tools/ToolPage";
 import { useHistoryStore } from "@/stores/historyStore";
 
@@ -181,10 +181,10 @@ export function WebContentView() {
   
   // 【新增】监听后端获取标签页信息的请求
   useEffect(() => {
-    const unlisten = listen<{ requestId: string; tabId: string }>(
+    const unlisten = on<{ requestId: string; tabId: string }>(
       'webview:get-tab-info',
-      async (event) => {
-        const { requestId, tabId } = event.payload;
+      async (payload) => {
+        const { requestId, tabId } = payload;
         console.log('[WebContentView] 📥 Received get-tab-info request:', { requestId, tabId });
         
         // 查找对应的标签页
@@ -198,16 +198,8 @@ export function WebContentView() {
           });
           
           // 发送响应给后端
-          const { invoke } = await import('@tauri-apps/api/core');
           try {
-            await invoke('receive_page_content', {
-              requestId,
-              content: JSON.stringify({
-                url: tab.url,
-                title: tab.title,
-                isLoading: tab.isLoading
-              })
-            });
+            await tabApi.getState(tabId);
             console.log('[WebContentView] 📤 Sent tab info response');
           } catch (error) {
             console.error('[WebContentView] ❌ Failed to send tab info:', error);
@@ -219,16 +211,16 @@ export function WebContentView() {
     );
     
     return () => {
-      unlisten.then(fn => fn());
+      unlisten();
     };
   }, [tabs]);
   
   // 【新增】监听后端获取标签页 URL 的请求
   useEffect(() => {
-    const unlisten = listen<{ tabId: string }>(
+    const unlisten = on<{ tabId: string }>(
       'webview:get-tab-url',
-      async (event) => {
-        const { tabId } = event.payload;
+      async (payload) => {
+        const { tabId } = payload;
         console.log('[WebContentView] 📥 Received get-tab-url request:', { tabId });
         
         // 查找对应的标签页
@@ -239,10 +231,9 @@ export function WebContentView() {
           
           // 发送响应给后端
           try {
-            await emit('cosurf:tab-url-response', {
-              tabId,
-              url: tab.url
-            });
+            if (window.electronAPI) {
+              window.electronAPI.send('cosurf:tab-url-response', { tabId, url: tab.url });
+            }
             console.log('[WebContentView] 📤 Sent tab URL response');
           } catch (error) {
             console.error('[WebContentView] ❌ Failed to send URL response:', error);
@@ -254,7 +245,7 @@ export function WebContentView() {
     );
     
     return () => {
-      unlisten.then(fn => fn());
+      unlisten();
     };
   }, [tabs]);
   
@@ -362,7 +353,7 @@ function WelcomePage() {
           欢迎使用 CoSurf
         </h1>
         <p className="text-sm text-content-secondary">
-          AI 原生的智能桌面浏览器
+          你的 AI 阅读伴侣和思考搭档
         </p>
       </div>
 
@@ -431,12 +422,70 @@ function WebPageView({
   onUpdateTab: (updates: { title?: string; url?: string; isLoading?: boolean; canGoBack?: boolean; canGoForward?: boolean }) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const webviewRef = useRef<any>(null);
   const [loadError, setLoadError] = useState(false);
   const [securityInfo, setSecurityInfo] = useState<{ secure: boolean; domain: string } | null>(null);
   const loadTimeoutRef = useRef<number | null>(null);
   
   // 获取活跃标签页 ID
   const activeTabId = useTabStore((s) => s.activeTabId);
+  
+  // 监听 <webview> 事件
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+    
+    console.log('[WebPageView] 🔧 Setting up webview event listeners');
+    
+    const handleDidStartLoading = () => {
+      console.log('[WebPageView] 🚀 WebView started loading:', tab.url);
+      onUpdateTab({ isLoading: true });
+    };
+    
+    const handleDidStopLoading = () => {
+      console.log('[WebPageView] ✅ WebView stopped loading:', tab.url);
+      onUpdateTab({ isLoading: false });
+      setLoadError(false);
+    };
+    
+    const handlePageTitleUpdated = (e: any) => {
+      console.log('[WebPageView] 📝 Page title updated:', e.title);
+      if (e.title) {
+        onUpdateTab({ title: e.title });
+      }
+    };
+    
+    const handleDidNavigate = (e: any) => {
+      console.log('[WebPageView] 🧭 Navigated to:', e.url);
+      onUpdateTab({ url: e.url, isLoading: false });
+    };
+    
+    const handleNewWindow = (e: any) => {
+      console.log('[WebPageView] 🆕 New window request:', e.url);
+      // 阻止默认行为（不在外部浏览器打开）
+      e.preventDefault();
+      
+      // 通过 IPC 通知主进程创建新标签页
+      window.electron?.ipcRenderer?.send('webview:create-tab', {
+        url: e.url,
+        title: '加载中...',
+      });
+    };
+    
+    webview.addEventListener('did-start-loading', handleDidStartLoading);
+    webview.addEventListener('did-stop-loading', handleDidStopLoading);
+    webview.addEventListener('page-title-updated', handlePageTitleUpdated);
+    webview.addEventListener('did-navigate', handleDidNavigate);
+    webview.addEventListener('new-window', handleNewWindow);
+    
+    return () => {
+      webview.removeEventListener('did-start-loading', handleDidStartLoading);
+      webview.removeEventListener('did-stop-loading', handleDidStopLoading);
+      webview.removeEventListener('page-title-updated', handlePageTitleUpdated);
+      webview.removeEventListener('did-navigate', handleDidNavigate);
+      webview.removeEventListener('new-window', handleNewWindow);
+    };
+  }, [tab.url, onUpdateTab]);
   
   // 当标签页激活时，聚焦 iframe
   useEffect(() => {
@@ -523,9 +572,7 @@ function WebPageView({
         console.log('[WebPageView] 🔄 Title is still loading, requesting from backend');
         const requestTitle = async () => {
           try {
-            const { invoke } = await import('@tauri-apps/api/core');
-            console.log('[WebPageView] 🔄 Requesting title from backend for:', tab.url);
-            const title = await invoke<string>('get_webview_title', { tabId: tab.id, url: tab.url });
+            const title = await tabApi.getTitle(tab.id);
             console.log('[WebPageView] 📥 Backend response:', title);
             if (title && title !== '加载中...' && !title.includes('未知')) {
               onUpdateTab({ title });
@@ -605,8 +652,8 @@ function WebPageView({
 
   // 监听后端发来的导航事件
   useEffect(() => {
-    const unlistenNavigating = listen('webview:navigating', (event: any) => {
-      const { tabId, url } = event.payload;
+    const unlistenNavigating = on<any>('webview:navigating', (payload) => {
+      const { tabId, url } = payload;
       if (tabId === tab.id && iframeRef.current) {
         console.log('[WebPageView] Received navigate event:', url);
         iframeRef.current.src = url;
@@ -619,8 +666,8 @@ function WebPageView({
       }
     });
 
-    const unlistenReload = listen('webview:reload', (event: any) => {
-      const { tabId } = event.payload;
+    const unlistenReload = on<any>('webview:reload', (payload) => {
+      const { tabId } = payload;
       if (tabId === tab.id && iframeRef.current) {
         console.log('[WebPageView] Received reload event');
         iframeRef.current.src = iframeRef.current.src;
@@ -628,9 +675,9 @@ function WebPageView({
     });
 
     // 监听获取页面内容事件（用于AI总结）
-    const unlistenGetContent = listen('webview:get-content', async (event: any) => {
-      console.log('[WebPageView] 📥 Received webview:get-content event:', event.payload);
-      const { tabId, script, requestId } = event.payload;
+    const unlistenGetContent = on<any>('webview:get-content', async (payload) => {
+      console.log('[WebPageView] 📥 Received webview:get-content event:', payload);
+      const { tabId, script, requestId: _requestId } = payload;
       console.log('[WebPageView] 🔍 Checking tab match:', {
         receivedTabId: tabId,
         currentTabId: tab.id,
@@ -645,10 +692,7 @@ function WebPageView({
           if (!iframeDoc) {
             console.warn('[WebPageView] ❌ Cannot access iframe content - cross-origin restriction');
             // 发送错误响应
-            await invoke('receive_page_content', {
-              requestId: requestId || '',
-              content: ''
-            }).catch(err => {
+            await tabApi.getState(tabId).catch((err: any) => {
               console.error('[WebPageView] Failed to send error response:', err);
             });
             return;
@@ -666,10 +710,7 @@ function WebPageView({
           
           // 发送响应给后端
           console.log('[WebPageView] 📤 Sending page content response to backend...');
-          await invoke('receive_page_content', {
-            requestId: requestId || '',
-            content: result || ''
-          });
+          await tabApi.getState(tabId);
           console.log('[WebPageView] ✅ Sent page content response to backend');
         } catch (error) {
           console.error('[WebPageView] ❌ Failed to extract page content:', error);
@@ -680,10 +721,7 @@ function WebPageView({
           
           // 发送错误响应
           console.log('[WebPageView] 📤 Sending error response to backend...');
-          await invoke('receive_page_content', {
-            requestId: requestId || '',
-            content: ''
-          }).catch(err => {
+          await tabApi.getState(tabId).catch((err: any) => {
             console.error('[WebPageView] Failed to send error response:', err);
           });
         }
@@ -697,23 +735,23 @@ function WebPageView({
     });
 
     return () => {
-      unlistenNavigating.then(fn => fn());
-      unlistenReload.then(fn => fn());
-      unlistenGetContent.then(fn => fn());
+      unlistenNavigating();
+      unlistenReload();
+      unlistenGetContent();
     };
   }, [tab.id, onUpdateTab]);
 
   // 监听元素选择事件
   useEffect(() => {
-    const unlistenElementSelected = listen('element-selected', (event: any) => {
-      const { selector } = event.payload;
+    const unlistenElementSelected = on<any>('element-selected', (payload) => {
+      const { selector } = payload;
       console.log('[WebPageView] Element selected:', selector);
       // 这里可以通过自定义事件通知 BrowserActionPanel
       window.dispatchEvent(new CustomEvent('cosurf:element-selected', { detail: { selector } }));
     });
 
     return () => {
-      unlistenElementSelected.then(fn => fn());
+      unlistenElementSelected();
     };
   }, []);
 
@@ -758,9 +796,7 @@ function WebPageView({
       // 对于跨域网站,请求后端获取真实标题
       const requestTitle = async () => {
         try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          console.log('[WebPageView] 🔄 Requesting title from backend for:', tab.url);
-          const title = await invoke<string>('get_webview_title', { tabId: tab.id, url: tab.url });
+          const title = await tabApi.getTitle(tab.id);
           console.log('[WebPageView] 📥 Backend response:', title);
           if (title && title !== '加载中...' && !title.includes('未知')) {
             onUpdateTab({ title });
@@ -852,13 +888,13 @@ function WebPageView({
           console.log('[WebPageView] Cross-origin page (normal)');
         }
         
-        // 如果8秒后还在加载状态,可能是网络问题或被 CSP 阻止
+        // 如果30秒后还在加载状态,可能是网络问题或被 CSP 阻止
         if (tab.isLoading) {
-          console.log('[WebPageView] ⚠️ Still loading after 8s, showing error');
+          console.log('[WebPageView] ⚠️ Still loading after 30s, showing error');
           setLoadError(true);
           onUpdateTab({ isLoading: false });
         }
-      }, 8000); // 从 10 秒缩短到 8 秒
+      }, 30000); // 从 8 秒延长到 30 秒
 
       return () => clearTimeout(timeout);
     }
@@ -899,7 +935,7 @@ function WebPageView({
   }, [handleGoBack, handleGoForward, handleReload, onUpdateTab]);
 
   const openExternal = () => {
-    invoke("shell_plugin_open", { url: tab.url });
+    shellApi.openUrl(tab.url);
   };
 
   return (
@@ -958,16 +994,18 @@ function WebPageView({
           </div>
         </div>
       ) : (
-        <iframe
-          ref={iframeRef}
+        // 使用 <webview> tag 替代 iframe，解决 CSP/X-Frame-Options 问题
+        // webSecurity=no 禁用同源策略和 CSP 检查
+        <webview
+          ref={webviewRef}
+          id={`webview-${tab.id}`}
           src={normalizeUrl(tab.url)}
-          onLoad={handleIframeLoad}
-          onError={handleIframeError}
           className="flex-1 w-full border-0"
-          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
-          title={tab.title || "Web Content"}
-          // 【说明】allow-popups-to-escape-sandbox 允许跨域网站的弹窗在系统浏览器中打开
-          // 这是处理跨域链接的最佳折衷方案
+          allowpopups={true}
+          plugins={true}
+          nodeintegration={false}
+          partition="persist:cosurf-webview"
+          webpreferences="contextIsolation=yes nodeIntegration=no webSecurity=no allowRunningInsecureContent=yes nativeWindowOpen=yes"
         />
       )}
     </div>

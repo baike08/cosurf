@@ -26,7 +26,7 @@ import { useTabStore } from "@/stores/tabStore";
 import { IconButton } from "@/components/ui/IconButton";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn, getDomain } from "@/lib/utils";
-import { invoke } from "@/lib/tauri";
+import { db } from "@/lib/api";
 import type { Message } from "@cosurf/shared";
 
 export function AIPanel() {
@@ -392,14 +392,11 @@ function MessageItem({ message, userName }: { message: Message; userName: string
   const handleFeedback = async (type: "like" | "dislike") => {
     const newFeedback = feedback === type ? "" : type;
     try {
-      const updated = await invoke<Message>("set_message_feedback", {
-        id: message.id,
-        feedback: newFeedback,
-      });
+      await db.setMessageFeedback(message.id, newFeedback);
       // 更新本地状态
       const store = useConversationStore.getState();
       store.messages = store.messages.map((m) =>
-        m.id === message.id ? { ...m, feedback: updated.feedback } : m
+        m.id === message.id ? { ...m, feedback: newFeedback } : m
       );
       useConversationStore.setState({ messages: store.messages });
     } catch (e) {
@@ -492,9 +489,7 @@ function MessageItem({ message, userName }: { message: Message; userName: string
                     const handleClick = (e: React.MouseEvent) => {
                       e.preventDefault();
                       if (href) {
-                        console.log('[AIPanel] 🖱️ Link clicked:', href);
-                        const newTabId = addTab(href, getDomain(href));
-                        console.log('[AIPanel] ✅ New tab created:', newTabId);
+                        addTab(href, getDomain(href));
                       }
                     };
                     

@@ -18,7 +18,7 @@ export function ToolPage({ toolId }: ToolPageProps) {
             return <JsonValidator />;
           default:
             return (
-              <div className="h-full flex flex-col items-center justify-center gap-4 text-content-tertiary bg-surface-secondary pt-[80px]">
+              <div className="h-full flex flex-col items-center justify-center gap-4 text-content-tertiary bg-surface-secondary">
                 <Wrench className="w-12 h-12" />
                 <div className="text-center">
                   <div className="text-sm font-medium text-content-secondary">

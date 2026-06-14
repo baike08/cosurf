@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useTabStore } from "@/stores/tabStore";
 import { onPageContent, onPageContentError } from "@/lib/tools";
-import { invoke } from "@tauri-apps/api/core";
+import { page as pageApi } from "@/lib/api";
 
 /**
  * 工具调用演示组件
@@ -28,8 +28,8 @@ export function ToolDemo() {
     });
 
     return () => {
-      unlistenContent.then(fn => fn());
-      unlistenError.then(fn => fn());
+      unlistenContent();
+      unlistenError();
     };
   }, []);
 
@@ -47,10 +47,7 @@ export function ToolDemo() {
 
     try {
       // 调用后端总结功能
-      const result = await invoke<string>("summarize_page", {
-        tabId: activeTabId,
-        maxLength: 500,
-      });
+      const result = await pageApi.summarize(activeTabId);
       
       setToolResult(result);
     } catch (error) {
@@ -72,11 +69,7 @@ export function ToolDemo() {
     setIsLoading(true);
     
     try {
-      const result = await invoke<string>("execute_web_action", {
-        tabId: activeTabId,
-        action: "click",
-        selector: "button:first-of-type", // 点击第一个按钮
-      });
+      const result = await pageApi.executeAction(activeTabId, "click", "button:first-of-type");
       
       setToolResult(result);
       setIsLoading(false);
@@ -99,12 +92,7 @@ export function ToolDemo() {
     setIsLoading(true);
     
     try {
-      const result = await invoke<string>("execute_web_action", {
-        tabId: activeTabId,
-        action: "fill",
-        selector: "input[type='text']:first-of-type",
-        value: "测试文本",
-      });
+      const result = await pageApi.executeAction(activeTabId, "fill", "input[type='text']:first-of-type", "测试文本");
       
       setToolResult(result);
       setIsLoading(false);
@@ -127,11 +115,7 @@ export function ToolDemo() {
     setIsLoading(true);
     
     try {
-      const result = await invoke<string>("execute_web_action", {
-        tabId: activeTabId,
-        action: "close_popup",
-        selector: "",
-      });
+      const result = await pageApi.executeAction(activeTabId, "close_popup", "");
       
       setToolResult(result);
       setIsLoading(false);

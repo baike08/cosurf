@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { MousePointer2, Hand, Type, Image as ImageIcon, Scroll, Trash2, FileText } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { page as pageApi } from "@/lib/api";
 import { useTabStore } from "@/stores/tabStore";
 
 /**
@@ -36,10 +36,10 @@ export function BrowserActionPanel() {
     setIsSelectMode(newMode);
 
     try {
-      await invoke("browser_toggle_select_mode", {
-        tabId: activeTabId,
-        enabled: newMode,
-      });
+      // 选择模式通过 executeScript 实现
+      await pageApi.executeScript(activeTabId, `
+        document.body.style.cursor = ${newMode ? "'crosshair'" : "'default'"};
+      `);
     } catch (err) {
       console.error("[BrowserActionPanel] Toggle select mode failed:", err);
     }
@@ -50,10 +50,9 @@ export function BrowserActionPanel() {
     if (!activeTabId || !selectedElement) return;
 
     try {
-      await invoke("browser_click_element", {
-        tabId: activeTabId,
-        selector: selectedElement,
-      });
+      await pageApi.executeScript(activeTabId, `
+        document.querySelector(${JSON.stringify(selectedElement)})?.click();
+      `);
       
       setActionHistory(prev => [...prev, `Clicked: ${selectedElement}`]);
     } catch (err) {
@@ -66,11 +65,12 @@ export function BrowserActionPanel() {
     if (!activeTabId || !selectedElement || !textInput) return;
 
     try {
-      await invoke("browser_input_text", {
-        tabId: activeTabId,
-        selector: selectedElement,
-        text: textInput,
-      });
+      await pageApi.executeScript(activeTabId, `
+        (function() {
+          const el = document.querySelector(${JSON.stringify(selectedElement)});
+          if (el) { el.value = ${JSON.stringify(textInput)}; el.dispatchEvent(new Event('input', {bubbles:true})); }
+        })();
+      `);
       
       setActionHistory(prev => [...prev, `Input "${textInput}" into: ${selectedElement}`]);
       setTextInput("");
@@ -84,10 +84,9 @@ export function BrowserActionPanel() {
     if (!activeTabId) return;
 
     try {
-      await invoke("browser_scroll", {
-        tabId: activeTabId,
-        direction,
-      });
+      await pageApi.executeScript(activeTabId, `
+        window.scrollBy(0, ${direction === 'up' ? -300 : direction === 'down' ? 300 : 0});
+      `);
       
       setActionHistory(prev => [...prev, `Scrolled ${direction}`]);
     } catch (err) {
@@ -100,10 +99,7 @@ export function BrowserActionPanel() {
     if (!activeTabId) return;
 
     try {
-      const result = await invoke("browser_screenshot", {
-        tabId: activeTabId,
-        fullPage: false,
-      });
+      const result = await pageApi.screenshot(activeTabId);
       
       setActionHistory(prev => [...prev, "Screenshot taken"]);
       console.log("[BrowserActionPanel] Screenshot result:", result);
@@ -117,18 +113,7 @@ export function BrowserActionPanel() {
     if (!activeTabId) return;
 
     try {
-      const script = `
-        (function() {
-          const clone = document.body.cloneNode(true);
-          clone.querySelectorAll('script, style, noscript').forEach(el => el.remove());
-          return clone.innerText.trim().substring(0, 5000);
-        })()
-      `;
-
-      const result = await invoke("browser_execute_script", {
-        tabId: activeTabId,
-        script,
-      });
+      const result = await pageApi.getContent(activeTabId);
       
       setActionHistory(prev => [...prev, "Content extracted"]);
       console.log("[BrowserActionPanel] Extracted content:", result);

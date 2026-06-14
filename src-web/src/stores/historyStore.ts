@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { db } from "@/lib/api";
 
 interface HistoryEntry {
   id: string;
@@ -37,10 +37,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
   loadHistory: async (limit = 100) => {
     set({ loading: true });
     try {
-      const entries = await invoke<HistoryEntry[]>("list_history", {
-        limit,
-        offset: 0,
-      });
+      const entries = await db.listHistory(limit, 0);
       set({ entries, loading: false });
     } catch (error) {
       console.error("[HistoryStore] Failed to load history:", error);
@@ -55,10 +52,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     }
     set({ loading: true });
     try {
-      const entries = await invoke<HistoryEntry[]>("search_history", {
-        query,
-        limit: 100,
-      });
+      const entries = await db.searchHistory(query, 100);
       set({ entries, loading: false });
     } catch (error) {
       console.error("[HistoryStore] Failed to search history:", error);
@@ -70,9 +64,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     // 跳过内部页面和空白页
     if (!url || url === "about:blank" || url.startsWith("cosurf://")) return;
     try {
-      await invoke("add_history", {
-        request: { title: title || url, url },
-      });
+      await db.addHistory(title || url, url);
       // 重新加载历史
       const { searchQuery } = get();
       if (searchQuery.trim()) {
@@ -87,7 +79,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 
   deleteEntry: async (id: string) => {
     try {
-      await invoke("delete_history_entry", { id });
+      await db.deleteHistoryEntry(id);
       set((state) => ({
         entries: state.entries.filter((e) => e.id !== id),
       }));
@@ -98,7 +90,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
 
   clearAll: async () => {
     try {
-      await invoke("clear_history");
+      await db.clearHistory();
       set({ entries: [] });
     } catch (error) {
       console.error("[HistoryStore] Failed to clear history:", error);
