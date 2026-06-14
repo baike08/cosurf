@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type SidebarPanel = "bookmarks" | "history" | "conversations" | "downloads" | "none";
-export type SettingsView = "general" | "models" | "tools" | "skills" | "mcp" | "agent-prompts" | "shortcuts";
+export type SettingsView = "general" | "models" | "skills" | "mcp" | "agent-prompts" | "shortcuts";
 
 interface UIState {
   sidebarOpen: boolean;

@@ -2,7 +2,6 @@ import {
   X,
   Monitor,
   Cpu,
-  Wrench,
   Keyboard,
   Sun,
   Moon,
@@ -17,7 +16,7 @@ import { useUIStore, type SettingsView } from "@/stores/uiStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { IconButton } from "@/components/ui/IconButton";
 import { cn } from "@/lib/utils";
-import { MODEL_PROVIDER_PRESETS, BUILT_IN_TOOLS } from "@cosurf/shared";
+import { MODEL_PROVIDER_PRESETS } from "@cosurf/shared";
 import { db } from "@/lib/api";
 import type { ThemeMode, ModelConfig } from "@cosurf/shared";
 import { SkillsSettings } from "./SkillsSettings";
@@ -28,7 +27,6 @@ import { useState, useEffect } from "react";
 const navItems: { id: SettingsView; icon: typeof Monitor; label: string }[] = [
   { id: "general", icon: Monitor, label: "常规" },
   { id: "models", icon: Cpu, label: "模型" },
-  { id: "tools", icon: Wrench, label: "工具" },
   { id: "skills", icon: Code, label: "Skills" },
   { id: "mcp", icon: Server, label: "MCP Servers" },
   { id: "agent-prompts", icon: Edit, label: "Agent Prompts" },
@@ -115,7 +113,6 @@ export function SettingsPage() {
           <div className="flex-1 overflow-y-auto p-4">
             {settingsView === "general" && <GeneralSettings />}
             {settingsView === "models" && <ModelSettings />}
-            {settingsView === "tools" && <ToolSettings />}
             {settingsView === "skills" && <SkillsSettings />}
             {settingsView === "mcp" && <McpServersSettings />}
             {settingsView === "agent-prompts" && <AgentPromptsSettings />}
@@ -567,18 +564,6 @@ function AddModelForm({ model, onDone }: { model?: ModelConfig | null; onDone: (
         >
           取消
         </button>
-      </div>
-    </div>
-  );
-}
-
-function ToolSettings() {
-  return (
-    <div className="space-y-4">
-      <div className="p-3 bg-surface-secondary border border-border rounded-lg">
-        <div className="text-xs text-content-secondary">
-          工具配置功能已移除。
-        </div>
       </div>
     </div>
   );
