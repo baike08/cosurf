@@ -13,7 +13,6 @@ export interface AppSettings {
   aiDataPrivacy: boolean;
   shortcuts: ShortcutConfig;
   userDataPath: string; // 用户数据路径（用于存储页面缓存等）
-  // 注意: iqsApiKey 是独立配置，通过 store 顶层字段管理，不在 AppSettings 中
 }
 
 export interface ShortcutConfig {

@@ -283,7 +283,6 @@ CoSurf/
 │   │   │   │   ├── dispatcher.rs            # 工具调度器（含 MCP 路由）
 │   │   │   │   ├── open_url.rs              # 打开网页
 │   │   │   │   ├── summarize_page.rs        # 页面总结
-│   │   │   │   ├── web_search.rs            # 联网搜索（阿里云 IQS）
 │   │   │   │   ├── web_agent.rs             # 网页操作
 │   │   │   │   └── run_command.rs           # 命令执行
 │   │   │   └── skills_executors/ # Skills 执行器
@@ -318,8 +317,7 @@ CoSurf/
 │
 ├── examples/                   # 示例 Skills
 │   ├── echo-skill.json
-│   ├── python-calculator-skill.json
-│   └── alibabacloud-iqs-search-skill.json
+│   └── python-calculator-skill.json
 │
 └── scripts/                    # 构建/检查脚本
     ├── dev.ps1                 # 开发模式启动脚本
@@ -430,11 +428,8 @@ CoSurf 为 AI 提供了以下内置工具，使其能够与浏览器交互：
 |---------|---------|----------|
 | `open_url` | 打开新的网页标签页 | `tools_impl/open_url.rs` |
 | `summarize_page` | 总结当前页面内容 | `tools_impl/summarize_page.rs` |
-| `web_search` | 联网搜索（阿里云 IQS） | `tools_impl/web_search.rs` |
 | `run_command` | 执行系统命令 | `tools_impl/run_command.rs` |
 | `web_agent` | 网页元素操作 | `tools_impl/web_agent.rs` |
-
-> **注意**: web_search 需要在设置中配置 ALIYUN_IQS_API_KEY
 
 ### MCP Server 配置
 

@@ -42,7 +42,6 @@ export function SettingsPage() {
   const setSettingsView = useUIStore((s) => s.setSettingsView);
   const loadModels = useSettingsStore((s) => s.loadModels);
   const setSkillsDirectory = useSettingsStore((s) => s.setSkillsDirectory);
-  const setIqsApiKey = useSettingsStore((s) => s.setIqsApiKey);
 
   // 当设置页面打开时，加载模型列表
   useEffect(() => {
@@ -62,17 +61,6 @@ export function SettingsPage() {
     }
   }, [settingsOpen, settingsView, setSkillsDirectory]);
 
-  // 当切换到 tools 标签时，加载 IQS API Key
-  useEffect(() => {
-    if (settingsOpen && settingsView === "tools") {
-      console.log('[SettingsPage] Switched to tools tab, loading IQS config...');
-      db.getIqsApiKey().then(key => {
-        console.log('[SettingsPage] IQS API key:', key ? '***' + key.slice(-4) : 'null');
-        setIqsApiKey(key || "");
-      }).catch(console.error);
-    }
-  }, [settingsOpen, settingsView, setIqsApiKey]);
-
   // 首次打开设置页面时，预加载所有配置（避免切换标签时才加载）
   useEffect(() => {
     if (settingsOpen) {
@@ -81,13 +69,8 @@ export function SettingsPage() {
         console.log('[SettingsPage] Skills directory:', dir);
         setSkillsDirectory(dir || "");
       }).catch(console.error);
-      
-      db.getIqsApiKey().then(key => {
-        console.log('[SettingsPage] IQS API key:', key ? '***' + key.slice(-4) : 'null');
-        setIqsApiKey(key || "");
-      }).catch(console.error);
     }
-  }, [settingsOpen, setSkillsDirectory, setIqsApiKey]);
+  }, [settingsOpen, setSkillsDirectory]);
 
   if (!settingsOpen) return null;
 
@@ -590,138 +573,11 @@ function AddModelForm({ model, onDone }: { model?: ModelConfig | null; onDone: (
 }
 
 function ToolSettings() {
-  const storeIqsApiKey = useSettingsStore((s) => s.iqsApiKey);
-  const setIqsApiKey = useSettingsStore((s) => s.setIqsApiKey);
-  const [iqsApiKey, setIqsApiKeyLocal] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
-  const [errorMessage, setErrorMessage] = useState("");
-
-  // 同步 store 中的值到本地状态
-  useEffect(() => {
-    console.log('[ToolSettings] storeIqsApiKey changed:', storeIqsApiKey ? '***' + storeIqsApiKey.slice(-4) : 'empty');
-    setIqsApiKeyLocal(storeIqsApiKey || "");
-  }, [storeIqsApiKey]);
-
-  // 保存 IQS API Key
-  const saveIqsApiKey = async () => {
-    try {
-      console.log('[ToolSettings] Saving IQS API Key...');
-      setSaveStatus("saving");
-      setErrorMessage("");
-      await setIqsApiKey(iqsApiKey);
-      console.log('[ToolSettings] IQS API Key saved successfully');
-      setSaveStatus("success");
-      
-      // 3秒后清除成功状态
-      setTimeout(() => {
-        setSaveStatus("idle");
-      }, 3000);
-    } catch (error) {
-      console.error('[ToolSettings] Failed to save IQS API Key:', error);
-      setSaveStatus("error");
-      setErrorMessage(String(error));
-      
-      // 5秒后清除错误状态
-      setTimeout(() => {
-        setSaveStatus("idle");
-        setErrorMessage("");
-      }, 5000);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      {/* IQS 配置 */}
-      <div>
-        <h3 className="text-xs font-medium mb-2">阿里云 IQS 搜索配置</h3>
-        <div className="p-3 bg-surface-secondary border border-border rounded-lg space-y-2">
-          <div className="text-2xs text-content-secondary">
-            配置阿里云智能查询服务(IQS) API Key，用于实时网页搜索。
-            <a 
-              href="https://help.aliyun.com/zh/document_detail/3025781.html" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-blue-500 hover:underline ml-1"
-            >
-              获取 API Key →
-            </a>
-          </div>
-          
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={iqsApiKey}
-              onChange={(e) => setIqsApiKeyLocal(e.target.value)}
-              placeholder="输入 ALIYUN_IQS_API_KEY"
-              className="flex-1 px-2 py-1.5 text-xs bg-surface border border-border rounded-md focus:outline-none focus:border-primary"
-            />
-            <button
-              onClick={saveIqsApiKey}
-              disabled={!iqsApiKey.trim() || saveStatus === "saving"}
-              className={`px-3 py-1.5 text-xs rounded-md flex items-center gap-1 transition-colors ${
-                saveStatus === "success"
-                  ? "bg-green-500 text-white"
-                  : saveStatus === "error"
-                  ? "bg-red-500 text-white"
-                  : saveStatus === "saving"
-                  ? "bg-primary/50 text-primary-foreground cursor-wait"
-                  : "bg-primary text-primary-foreground hover:bg-primary/90"
-              } disabled:opacity-50`}
-            >
-              {saveStatus === "saving" && (
-                <span className="animate-spin">⏳</span>
-              )}
-              {saveStatus === "success" && (
-                <span>✓</span>
-              )}
-              {saveStatus === "error" && (
-                <span>✗</span>
-              )}
-              {saveStatus === "idle" && "保存"}
-              {saveStatus === "saving" && "保存中..."}
-              {saveStatus === "success" && "已保存"}
-              {saveStatus === "error" && "失败"}
-            </button>
-          </div>
-          
-          {/* 错误提示 */}
-          {errorMessage && (
-            <div className="text-2xs text-red-600 dark:text-red-400">
-              {errorMessage}
-            </div>
-          )}
-          
-          {/* 成功提示 */}
-          {storeIqsApiKey && saveStatus !== "error" && (
-            <div className="text-2xs text-green-600 dark:text-green-400 flex items-center gap-1">
-              <span>✓</span>
-              <span>API Key 已配置并保存</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 内置工具列表 */}
-      <div>
-        <h3 className="text-xs font-medium mb-2">内置 AI 工具</h3>
-        <div className="space-y-2">
-          {BUILT_IN_TOOLS.map((tool) => (
-            <div
-              key={tool.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border"
-            >
-              <div className="w-8 h-8 rounded-lg bg-surface-tertiary flex items-center justify-center">
-                <Wrench className="w-4 h-4 text-content-secondary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium">{tool.name}</div>
-                <div className="text-2xs text-content-tertiary">
-                  {tool.description}
-                </div>
-              </div>
-              <ToggleSwitch checked={tool.enabled} onChange={() => {}} />
-            </div>
-          ))}
+      <div className="p-3 bg-surface-secondary border border-border rounded-lg">
+        <div className="text-xs text-content-secondary">
+          工具配置功能已移除。
         </div>
       </div>
     </div>

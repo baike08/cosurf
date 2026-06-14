@@ -29,8 +29,6 @@ pub enum BuiltInTool {
     Translate,
     /// 导出为 Markdown
     ExportMarkdown,
-    /// 联网搜索
-    WebSearch,
     /// 执行 shell 命令
     RunCommand,
 }
@@ -43,7 +41,6 @@ impl BuiltInTool {
             Self::OpenUrl => "open_url",
             Self::Translate => "translate",
             Self::ExportMarkdown => "export_markdown",
-            Self::WebSearch => "web_search",
             Self::RunCommand => "run_command",
         }
     }
@@ -55,7 +52,6 @@ impl BuiltInTool {
             Self::OpenUrl => "打开新的网页URL",
             Self::Translate => "翻译当前页面内容为指定语言",
             Self::ExportMarkdown => "将当前页面内容导出为 Markdown 格式",
-            Self::WebSearch => "搜索互联网获取最新信息",
             Self::RunCommand => "在系统终端执行 shell 命令（支持 Windows cmd / Linux/macOS sh），捕获 stdout/stderr 返回结果",
         }
     }
@@ -124,37 +120,6 @@ impl BuiltInTool {
                     "properties": {}
                 })
             }
-            Self::WebSearch => {
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "搜索查询词"
-                        },
-                        "engine_type": {
-                            "type": "string",
-                            "enum": ["Generic", "News", "Academic"],
-                            "description": "搜索引擎类型，默认 Generic",
-                            "default": "Generic"
-                        },
-                        "time_range": {
-                            "type": "string",
-                            "enum": ["OneDay", "OneWeek", "OneMonth", "OneYear", "NoLimit"],
-                            "description": "时间范围，默认 OneWeek",
-                            "default": "OneWeek"
-                        },
-                        "max_results": {
-                            "type": "integer",
-                            "description": "最大结果数（1-20），默认 5",
-                            "minimum": 1,
-                            "maximum": 20,
-                            "default": 5
-                        }
-                    },
-                    "required": ["query"]
-                })
-            }
             Self::RunCommand => {
                 serde_json::json!({
                     "type": "object",
@@ -202,7 +167,6 @@ pub fn get_available_tools_schemas() -> Vec<serde_json::Value> {
         BuiltInTool::OpenUrl.to_openai_schema(),
         BuiltInTool::Translate.to_openai_schema(),
         BuiltInTool::ExportMarkdown.to_openai_schema(),
-        BuiltInTool::WebSearch.to_openai_schema(),
         BuiltInTool::RunCommand.to_openai_schema(),
     ]
 }

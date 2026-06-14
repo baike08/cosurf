@@ -501,13 +501,12 @@ tags: [search, summary]
 ## 使用说明
 
 当用户需要搜索和总结信息时：
-1. 首先调用 web_search 工具搜索关键词
-2. 分析搜索结果
+1. 使用 open_url 工具打开网页
+2. 分析页面内容
 3. 使用 summarize_page 工具总结页面内容
 
 ## 可用工具
 
-- web_search: 搜索互联网
 - open_url: 打开网页
 - summarize_page: 总结页面内容`}
                   className="w-full h-64 px-3 py-2 text-xs font-mono bg-surface-secondary border border-border rounded-md focus:outline-none focus:border-primary resize-none"

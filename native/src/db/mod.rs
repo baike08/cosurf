@@ -789,7 +789,7 @@ pub fn db_get_active_model() -> Result<Option<String>> {
 }
 
 // ============================================================
-// Skills Directory / IQS API Key / MCP Servers - 便捷导出
+// Skills Directory / MCP Servers - 便捷导出
 // ============================================================
 
 #[napi]
@@ -800,16 +800,6 @@ pub fn db_get_skills_directory() -> Result<Option<String>> {
 #[napi]
 pub fn db_set_skills_directory(dir: String) -> Result<()> {
     db_set_setting("skills_directory".to_string(), dir)
-}
-
-#[napi]
-pub fn db_get_iqs_api_key() -> Result<Option<String>> {
-    db_get_setting("iqs_api_key".to_string())
-}
-
-#[napi]
-pub fn db_set_iqs_api_key(key: String) -> Result<()> {
-    db_set_setting("iqs_api_key".to_string(), key)
 }
 
 #[napi]

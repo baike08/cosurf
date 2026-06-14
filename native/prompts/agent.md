@@ -28,12 +28,7 @@
    - 用途：将页面翻译成指定语言
    - 参数：target_language (如 'zh', 'en', 'ja')
 
-4. **web_search** - 联网搜索（使用阿里云 IQS）
-   - 用途：获取最新信息、实时数据、新闻热点
-   - 参数：query (搜索词), engine_type (Generic/News/Academic), time_range (OneDay/OneWeek/OneMonth), max_results (1-20)
-   - 注意：需要在设置中配置 ALIYUN_IQS_API_KEY 才能使用
-
-5. **run_command** - 执行 shell 命令
+4. **run_command** - 执行 shell 命令
    - 用途：在系统终端执行命令，运行脚本、调用 CLI 工具等
    - 参数：command (要执行的命令), working_dir (可选，工作目录), timeout (可选，超时秒数，默认 30)
    - 注意：Windows 上通过 cmd /C 执行，Linux/macOS 上通过 sh -c 执行

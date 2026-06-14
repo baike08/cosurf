@@ -62,8 +62,6 @@ const ALLOWED_INVOKE_CHANNELS = [
   'db:delete_model_config',
   'db:get_skills_directory',
   'db:set_skills_directory',
-  'db:get_iqs_api_key',
-  'db:set_iqs_api_key',
   'db:list_mcp_servers',
   'db:get_mcp_server',
   'db:create_mcp_server',

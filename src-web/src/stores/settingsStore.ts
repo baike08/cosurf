@@ -10,12 +10,9 @@ interface SettingsState {
   isLoading: boolean;
   // Skills 配置
   skillsDirectory: string;
-  // IQS API Key (独立配置)
-  iqsApiKey: string;
 
   loadModels: () => Promise<void>;
   loadSkillsDirectory: () => Promise<void>;
-  loadIqsApiKey: () => Promise<void>;
   setTheme: (theme: ThemeMode) => void;
   setLanguage: (lang: Language) => void;
   setUserName: (name: string) => void;
@@ -26,8 +23,6 @@ interface SettingsState {
   updateModel: (id: string, updates: Partial<ModelConfig>) => Promise<void>;
   // Skills 配置方法
   setSkillsDirectory: (directory: string) => Promise<void>;
-  // IQS API Key 方法
-  setIqsApiKey: (apiKey: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -36,7 +31,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   activeModelId: "",
   isLoading: false,
   skillsDirectory: "",
-  iqsApiKey: "",
 
   loadModels: async () => {
     try {
@@ -169,32 +163,12 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     }
   },
 
-  loadIqsApiKey: async () => {
-    try {
-      console.log('[SettingsStore] Loading IQS API key...');
-      const iqsKey = await db.getIqsApiKey();
-      console.log('[SettingsStore] IQS API key loaded:', iqsKey ? '***' + iqsKey.slice(-4) : 'null');
-      set({ iqsApiKey: iqsKey || "" });
-    } catch (error) {
-      console.error("Failed to load IQS API key:", error);
-    }
-  },
-
   setSkillsDirectory: async (directory) => {
     try {
       await db.setSkillsDirectory(directory);
       set({ skillsDirectory: directory });
     } catch (error) {
       console.error("Failed to set skills directory:", error);
-    }
-  },
-
-  setIqsApiKey: async (apiKey) => {
-    try {
-      await db.setIqsApiKey(apiKey);
-      set({ iqsApiKey: apiKey });
-    } catch (error) {
-      console.error("Failed to set IQS API key:", error);
     }
   },
 }));

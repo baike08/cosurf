@@ -165,16 +165,6 @@ export const db = {
   setSkillsDirectory: (directory: string) =>
     invoke<void>('db:set_skills_directory', directory),
 
-  getIqsApiKey: async () => {
-    console.log('[API] Calling db:get_iqs_api_key');
-    const result = await invoke<string | null>('db:get_iqs_api_key');
-    console.log('[API] db:get_iqs_api_key result:', result);
-    return result;
-  },
-
-  setIqsApiKey: (apiKey: string) =>
-    invoke<void>('db:set_iqs_api_key', apiKey),
-
   // ----- MCP Servers -----
   listMcpServers: async () =>
     parseJSON<any[]>(await invoke<string>('db:list_mcp_servers')),

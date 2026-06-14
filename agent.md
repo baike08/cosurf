@@ -203,7 +203,7 @@ Agent 采用 **React Agent Loop** 模式：
 4. 继续下一轮 LLM 调用，直到无 tool_calls 或达到最大迭代（30次）
 
 **工具命名约定**：
-- 内置工具：`summarize_page`, `web_agent`, `open_url`, `web_search` 等
+- 内置工具：`summarize_page`, `web_agent`, `open_url` 等
 - Skills 工具：`skill_{skill_id}`
 - MCP 工具：`mcp_{server_name}_{tool_name}`
 
@@ -233,7 +233,7 @@ SQLite，WAL 模式，外键约束启用。7 张核心表：
 | bookmarks | 书签（URL、标题、文件夹） |
 | bookmark_folders | 书签文件夹（树形结构） |
 | history | 浏览历史 |
-| settings | 键值对设置（包括 Skills 目录、IQS API Key 等） |
+| settings | 键值对设置（包括 Skills 目录等） |
 | model_configs | AI 模型配置（多模型支持） |
 | mcp_servers | MCP Server 配置（stdio/http/sse） |
 

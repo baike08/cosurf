@@ -29,9 +29,6 @@ impl ToolCall {
             // 写入类工具
             "export_markdown" | "run_command" => ToolCategory::Write,
             
-            // 网络类工具
-            "web_search" => ToolCategory::Network,
-            
             // 浏览器类工具
             "open_url" | "web_agent" => ToolCategory::Browser,
             

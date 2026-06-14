@@ -103,16 +103,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 🔄 Optimized Agent Loop iteration 1/30
 [Chunk] conv=conv-123, msg=msg-456, thinking=false, done=false: 我需要执行以下工具调用...
 🔧 Found 5 tool calls in iteration 1
-📊 Smart scheduling: read=2, write=1, network=2, browser=0
+📊 Smart scheduling: read=2, write=1, network=1, browser=0
 📖 Executing 2 read tools in parallel
-🌐 Executing 2 network tools in parallel
+🌐 Executing 1 network tools in parallel
 [Tool Start] conv-123 - summarize_page (id: tc-1)
 [Tool Start] conv-123 - translate (id: tc-2)
-[Tool Start] conv-123 - web_search (id: tc-3)
-[Tool Start] conv-123 - mcp_iqs_search (id: tc-4)
+[Tool Start] conv-123 - mcp_iqs_search (id: tc-3)
 [Tool Result] conv-123 - summarize_page: success=true, output_length=1250
 [Tool Result] conv-123 - translate: success=true, output_length=890
-[Tool Result] conv-123 - web_search: success=true, output_length=2100
 [Tool Result] conv-123 - mcp_iqs_search: success=true, output_length=1500
 ✍️  Executing write tool: export_markdown
 [Tool Start] conv-123 - export_markdown (id: tc-5)

@@ -200,7 +200,6 @@ export function registerIpcHandlers(tabManager: TabManager, mainWindow: BrowserW
     'list_model_configs', 'get_model_config', 'get_active_model',
     'create_model_config', 'update_model_config', 'set_active_model', 'delete_model_config',
     'get_skills_directory', 'set_skills_directory',
-    'get_iqs_api_key', 'set_iqs_api_key',
     'list_mcp_servers', 'get_mcp_server', 'create_mcp_server',
     'update_mcp_server', 'delete_mcp_server', 'test_mcp_server',
     'import_mcp_servers_from_json',
