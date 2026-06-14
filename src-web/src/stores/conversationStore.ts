@@ -1,32 +1,9 @@
 import { create } from "zustand";
 import type { Conversation, Message } from "@cosurf/shared";
 import { generateId } from "@/lib/utils";
-import { invoke } from "@/lib/tauri";
-import { listen } from "@tauri-apps/api/event";
+import { db, ai } from "@/lib/api";
+import { on } from "@/lib/events";
 import { useSettingsStore } from "./settingsStore";
-
-interface BackendConversation {
-  id: string;
-  title: string;
-  isPinned: boolean;
-  modelId?: string;
-  messageCount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface BackendMessage {
-  id: string;
-  conversationId: string;
-  role: string;
-  content: string;
-  thinkingContent: string;
-  status: string;
-  attachments: any[];
-  createdAt: string;
-  updatedAt: string;
-  feedback: string;
-}
 
 interface ConversationState {
   conversations: Conversation[];
@@ -56,37 +33,31 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   loadConversations: async () => {
     try {
-      console.log('[ConversationStore] 🔄 Loading conversations...');
+      console.log('[ConversationStore] Loading conversations...');
       set({ isLoading: true });
-      const convs = await invoke<BackendConversation[]>("list_conversations");
-      console.log('[ConversationStore] ✅ Loaded conversations:', convs.length);
+      const convs = await db.listConversations();
+      console.log('[ConversationStore] Loaded conversations:', convs.length);
       set({
         conversations: convs as Conversation[],
         activeConversationId: convs[0]?.id ?? null,
         isLoading: false,
       });
       
-      // 加载第一个对话的消息
       if (convs[0]) {
-        console.log('[ConversationStore] 📥 Loading messages for first conversation:', convs[0].id);
         await get().loadMessages(convs[0].id);
       }
     } catch (error) {
-      console.error("[ConversationStore] ❌ Failed to load conversations:", error);
+      console.error("[ConversationStore] Failed to load conversations:", error);
       set({ isLoading: false });
     }
   },
 
   loadMessages: async (conversationId) => {
     try {
-      console.log('[ConversationStore] 📥 Loading messages for conversation:', conversationId);
-      const msgs = await invoke<BackendMessage[]>("list_messages", {
-        conversationId,
-      });
-      console.log('[ConversationStore] ✅ Loaded messages:', msgs.length);
+      const msgs = await db.listMessages(conversationId);
       set({ messages: msgs as Message[] });
     } catch (error) {
-      console.error("[ConversationStore] ❌ Failed to load messages:", error);
+      console.error("[ConversationStore] Failed to load messages:", error);
     }
   },
 
@@ -97,13 +68,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   createConversation: async () => {
     try {
-      const conv = await invoke<BackendConversation>("create_conversation", {
-        request: {
-          title: "新对话",
-          isPinned: false,
-        },
-      });
-      
+      const conv = await db.createConversation("新对话");
       set((state) => ({
         conversations: [conv as Conversation, ...state.conversations],
         activeConversationId: conv.id,
@@ -116,7 +81,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   deleteConversation: async (id) => {
     try {
-      await invoke("delete_conversation", { id });
+      await db.deleteConversation(id);
       set((state) => {
         const filtered = state.conversations.filter((c) => c.id !== id);
         const newActiveId =
@@ -136,23 +101,13 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
   },
 
   sendMessage: async (content) => {
-    console.log('[ConversationStore] 📤 Sending message:', content.slice(0, 50));
     let { activeConversationId, messages } = get();
-    if (!content.trim()) {
-      console.warn('[ConversationStore] ⚠️ Empty content, skipping');
-      return;
-    }
+    if (!content.trim()) return;
 
     // 如果没有活跃对话，自动创建一个
     if (!activeConversationId) {
-      console.log('[ConversationStore] 🆕 No active conversation, creating new one...');
       try {
-        const conv = await invoke<BackendConversation>("create_conversation", {
-          request: {
-            title: "新对话", // 使用默认标题，后续会用AI生成
-          },
-        });
-        console.log('[ConversationStore] ✅ Created new conversation:', conv.id);
+        const conv = await db.createConversation("新对话");
         set((state) => ({
           conversations: [conv as Conversation, ...state.conversations],
           activeConversationId: conv.id,
@@ -160,16 +115,18 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         activeConversationId = conv.id;
         messages = [];
       } catch (error) {
-        console.error("[ConversationStore] ❌ Failed to auto-create conversation:", error);
+        console.error("[ConversationStore] Failed to auto-create conversation:", error);
         return;
       }
     }
 
-    // 先添加用户消息到本地
+    const currentConvId = activeConversationId!;
     const now = new Date().toISOString();
+
+    // 本地创建用户消息
     const userMsg: Message = {
       id: generateId(),
-      conversationId: activeConversationId!,
+      conversationId: currentConvId,
       role: "user",
       content: content.trim(),
       thinkingContent: "",
@@ -180,9 +137,10 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       feedback: "",
     };
 
+    const tempAssistantId = generateId();
     const assistantMsg: Message = {
-      id: generateId(),
-      conversationId: activeConversationId!,
+      id: tempAssistantId,
+      conversationId: currentConvId,
       role: "assistant",
       content: "",
       thinkingContent: "",
@@ -198,120 +156,95 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
       isStreaming: true,
     });
 
-    // 先设置监听器，再调用后端（确保不会错过事件）
+    // 先保存消息到 DB，捕获 DB 生成的真实 ID
+    let dbAssistantMsgId = tempAssistantId;
     try {
-      // 保存当前的 conversation ID，避免闭包问题
-      const currentConvId = activeConversationId!;
-
-      const unlistenChunk = await listen<{
-        conversation_id: string;
-        message_id: string;
-        delta: string;
-        is_thinking: boolean;
-        done: boolean;
-      }>("ai:stream-chunk", (event) => {
-        const payload = event.payload;
-        if (payload.conversation_id === currentConvId) {
-          console.log('[ConversationStore] 📨 Received chunk:', {
-            deltaLength: payload.delta.length,
-            isThinking: payload.is_thinking,
-            done: payload.done,
-            deltaPreview: payload.delta.slice(0, 50)
-          });
-          
-          get().appendStreamDelta(payload.delta, payload.is_thinking);
-          
-          if (payload.done) {
-            console.log('[ConversationStore] ✅ Stream finished');
-            get().finishStream();
-            unlistenChunk();
-            unlistenError();
-          }
-        }
-      });
-
-      // 监听错误事件
-      const unlistenError = await listen<{
-        conversation_id: string;
-        error: string;
-      }>("ai:stream-error", (event) => {
-        const payload = event.payload;
-        if (payload.conversation_id === currentConvId) {
-          get().appendStreamDelta(`\n\n❌ ${payload.error}`);
-          get().finishStream();
-          unlistenError();
-          unlistenChunk();
-        }
-      });
-
-      // 监听工具调用开始
-      const _unlistenToolStart = await listen<{
-        conversation_id: string;
-        message_id: string;
-        tool_name: string;
-        arguments: any;
-      }>("ai:tool-call-start", (event) => {
-        const payload = event.payload;
-        if (payload.conversation_id === currentConvId) {
-          console.log('[Tool Call Start]', payload.tool_name, payload.arguments);
-          // 不在消息内容中显示工具执行通知，避免重复
-          // get().appendStreamDelta(`\n\n🔧 正在执行: ${payload.tool_name}...`);
-        }
-      });
-      void _unlistenToolStart; // Mark as intentionally unused
-
-      // 监听工具调用结果
-      const _unlistenToolResult = await listen<{
-        conversation_id: string;
-        message_id: string;
-        tool_name: string;
-        output: string;
-        success: boolean;
-      }>("ai:tool-call-result", (event) => {
-        const payload = event.payload;
-        if (payload.conversation_id === currentConvId) {
-          console.log('[Tool Call Result]', payload.tool_name, payload.output);
-          // 不在消息内容中显示工具执行结果，避免重复
-          // if (payload.success) {
-          //   get().appendStreamDelta(`\n\n✅ ${payload.tool_name} 执行成功: ${payload.output}`);
-          // } else {
-          //   get().appendStreamDelta(`\n\n❌ ${payload.tool_name} 执行失败: ${payload.output}`);
-          // }
-        }
-      });
-      void _unlistenToolResult; // Mark as intentionally unused
-
-      // 调用后端 AI 服务
-      console.log('[ConversationStore] 🚀 Calling backend send_chat_message...');
-      await invoke("send_chat_message", {
-        conversationId: currentConvId,
-        content: content.trim(),
-      });
-      console.log('[ConversationStore] ✅ Backend call completed');
-    } catch (error) {
-      console.error("[ConversationStore] ❌ Failed to send message to backend:", error);
-      // 更健壮的错误处理
-      let errorMsg: string;
-      if (error instanceof Error) {
-        errorMsg = error.message;
-      } else if (typeof error === 'string') {
-        errorMsg = error;
-      } else if (typeof error === 'object' && error !== null) {
-        // 尝试从对象中提取错误信息
-        const errObj = error as any;
-        errorMsg = errObj.message || errObj.error || JSON.stringify(error);
-      } else {
-        errorMsg = String(error);
+      await db.createMessage(currentConvId, "user", content.trim());
+      const createdAssistant = await db.createMessage(currentConvId, "assistant", "");
+      if (createdAssistant?.id) {
+        dbAssistantMsgId = createdAssistant.id;
+        console.log('[ConversationStore] DB assistant message created with ID:', dbAssistantMsgId);
       }
-      console.error('[ConversationStore] 💥 Error details:', { errorMsg, errorType: typeof error });
-      get().appendStreamDelta(`\n\n❌ 发送失败: ${errorMsg}\n\n请检查：\n1. 模型是否已配置并激活\n2. API Key 是否正确\n3. 网络连接是否正常`);
+    } catch (e) {
+      console.warn("[ConversationStore] Failed to persist messages to DB:", e);
+    }
+
+    // 设置流式事件监听
+    let unlistenChunk: (() => void) | null = null;
+    let unlistenError: (() => void) | null = null;
+
+    try {
+      unlistenChunk = on<{
+        conversationId: string;
+        messageId: string;
+        delta: string;
+        isThinking: boolean;
+        done: boolean;
+      }>("ai:stream-chunk", (payload) => {
+        console.log('[ConversationStore] stream-chunk received:', payload.conversationId, 'done:', payload.done, 'delta len:', payload.delta?.length);
+        if (payload.conversationId === currentConvId) {
+          get().appendStreamDelta(payload.delta, payload.isThinking);
+          // Rust stream.rs 已通过 save_chunk_to_db 直接保存到 DB，这里不再重复保存
+          if (payload.done) {
+            get().finishStream();
+            db.completeMessage(dbAssistantMsgId).catch(() => {});  // 标记消息完成
+            unlistenChunk?.();
+            unlistenError?.();
+          }
+        } else {
+          console.warn('[ConversationStore] Ignoring chunk for different conversation:', payload.conversationId, 'expected:', currentConvId);
+        }
+      });
+
+      unlistenError = on<{
+        conversationId: string;
+        error: string;
+      }>("ai:stream-error", (payload) => {
+        if (payload.conversationId === currentConvId) {
+          get().appendStreamDelta(`\n\n\u274c ${payload.error}`);
+          get().finishStream();
+          unlistenError?.();
+          unlistenChunk?.();
+        }
+      });
+
+      // 监听工具调用 (仅日志)
+      on<{ conversationId: string; toolName: string }>("ai:tool-call-start", (payload) => {
+        if (payload.conversationId === currentConvId) {
+          console.log('[Tool Call]', payload.toolName);
+        }
+      });
+
+      // 准备 AI 请求参数
+      const activeModel = useSettingsStore.getState().models.find(
+        (m) => m.id === useSettingsStore.getState().activeModelId
+      );
+      if (!activeModel) {
+        throw new Error("没有已激活的模型配置，请先在设置中添加模型");
+      }
+
+      // 加载对话中的所有消息用于上下文
+      const dbMessages = await db.listMessages(currentConvId);
+      const chatMessages = dbMessages.map((m: any) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      // 调用 AI 流式对话（使用 DB 生成的真实 ID）
+      await ai.sendChat(activeModel, chatMessages, currentConvId, dbAssistantMsgId);
+    } catch (error) {
+      console.error("[ConversationStore] Failed to send message:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      get().appendStreamDelta(`\n\n\u274c 发送失败: ${errorMsg}\n\n请检查：\n1. 模型是否已配置并激活\n2. API Key 是否正确\n3. 网络连接是否正常`);
       get().finishStream();
+      unlistenChunk?.();
+      unlistenError?.();
     }
   },
 
   stopStreaming: async () => {
     try {
-      await invoke("stop_generation");
+      await ai.stopGeneration();
       get().finishStream();
     } catch (error) {
       console.error("Failed to stop generation:", error);
@@ -322,14 +255,6 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
     set((state) => {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
-      console.log('[appendStreamDelta]', {
-        hasLast: !!last,
-        role: last?.role,
-        status: last?.status,
-        isThinking,
-        deltaLength: delta.length,
-        deltaPreview: delta.slice(0, 50)
-      });
       if (last && last.role === "assistant") {
         if (last.status === "streaming") {
           if (isThinking) {
@@ -337,17 +262,14 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
               ...last,
               thinkingContent: last.thinkingContent + delta,
             };
-            console.log('[appendStreamDelta] ✅ Appended to thinkingContent, new length:', (msgs[msgs.length - 1]?.thinkingContent || '').length);
           } else {
             msgs[msgs.length - 1] = {
               ...last,
               content: last.content + delta,
             };
-            console.log('[appendStreamDelta] ✅ Appended to content, new length:', (msgs[msgs.length - 1]?.content || '').length);
           }
         } else if (last.status === "complete" && delta.length > 0) {
-          // 如果消息是 complete 状态但有新内容（工具调用后的新一轮），重置为 streaming
-          console.log('[appendStreamDelta] 🔄 Resetting message status from complete to streaming');
+          // 工具调用后的新一轮，重置为 streaming
           if (isThinking) {
             msgs[msgs.length - 1] = {
               ...last,
@@ -361,12 +283,7 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
               content: last.content + delta,
             };
           }
-          console.log('[appendStreamDelta] ✅ Reset and appended, new status:', msgs[msgs.length - 1]?.status);
-        } else {
-          console.warn('[appendStreamDelta] ❌ Skipped - status is not streaming:', last.status, 'delta length:', delta.length);
         }
-      } else {
-        console.warn('[appendStreamDelta] ❌ Skipped - conditions not met');
       }
       return { messages: msgs };
     });
@@ -421,17 +338,15 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
         console.log(`检测到需要更新会话标题（已${roundCount}轮对话）`);
         
         // 调用 AI 生成标题
-        const response = await invoke<string>("generate_conversation_title", {
-          context: contextMessages,
-        });
+        const activeModel = useSettingsStore.getState().models.find(
+          (m) => m.id === useSettingsStore.getState().activeModelId
+        );
+        if (!activeModel) return;
+
+        const response = await ai.generateTitle(contextMessages, activeModel);
         
         // 更新会话标题
-        await invoke("update_conversation", {
-          id: activeConversationId,
-          request: {
-            title: response,
-          },
-        });
+        await db.updateConversation(activeConversationId, { title: response });
         
         // 更新本地状态
         set((state) => ({

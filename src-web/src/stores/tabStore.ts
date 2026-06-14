@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Tab } from "@cosurf/shared";
 import { generateId } from "@/lib/utils";
-import { invoke } from "@tauri-apps/api/core";
+import { tab as tabApi } from "@/lib/api";
 
 interface TabState {
   tabs: Tab[];
@@ -54,9 +54,6 @@ export const useTabStore = create<TabState>((set, get) => ({
   activeTabId: "tab-initial",
 
   setActiveTab: (id) => {
-    console.log('[TabStore] 🔄 Switching to tab:', id);
-    console.trace('[TabStore] 📍 setActiveTab called from:');
-    
     set((state) => ({
       activeTabId: id,
       tabs: state.tabs.map((t) => ({
@@ -65,27 +62,13 @@ export const useTabStore = create<TabState>((set, get) => ({
       })),
     }));
     
-    // 通知后端设置活跃标签页
-    invoke('set_active_tab', { tabId: id }).catch(err => {
-      console.error('[TabStore] Failed to set active tab:', err);
-    });
+    // 通知后端切换活跃标签页
+    tabApi.setActive(id).catch(() => {});
     
-    // 【核心改进】强制聚焦到主窗口，确保应用在前台
-    // 使用 requestAnimationFrame 确保 DOM 更新后执行
-    requestAnimationFrame(() => {
-      console.log('[TabStore] 🎯 Forcing window focus after tab switch');
-      window.focus();
-      
-      // 延迟一小段时间让 window.focus() 生效
-      setTimeout(() => {
-        // 尝试聚焦到标签页容器
-        const container = document.getElementById(`tab-container-${id}`);
-        if (container) {
-          container.focus();
-          console.log('[TabStore] ✅ Focused tab container:', id);
-        }
-      }, 50);
-    });
+    // 暴露给 Electron 主进程（用于 Electron Bridge 工具）
+    if (typeof window !== 'undefined') {
+      (window as any).__cosurf_activeTabId = id;
+    }
   },
 
   addTab: (url = "about:blank", title = "新标签页") => {
@@ -96,8 +79,6 @@ export const useTabStore = create<TabState>((set, get) => ({
     newTab.isActive = true;
     newTab.order = state.tabs.length;
 
-    console.log('[TabStore] ➕ Adding new tab:', { id, url, title, currentTabCount: state.tabs.length });
-
     set({
       activeTabId: id,
       tabs: [
@@ -106,50 +87,13 @@ export const useTabStore = create<TabState>((set, get) => ({
       ],
     });
     
-    // 验证更新是否成功
-    const newState = get();
-    const foundTab = newState.tabs.find(t => t.id === id);
-    console.log('[TabStore] ✅ Tab added, verification:', {
-      newActiveTabId: newState.activeTabId,
-      newTabCount: newState.tabs.length,
-      tabFound: !!foundTab,
-      foundTabUrl: foundTab?.url
-    });
-    
     // 通知后端设置活跃标签页
-    invoke('set_active_tab', { tabId: id }).catch(err => {
-      console.error('[TabStore] Failed to set active tab:', err);
-    });
+    tabApi.setActive(id).catch(() => {});
     
-    // 【核心改进】强制聚焦到主窗口和新标签页
-    // 【关键修复】使用多次重试机制，等待 DOM 更新
-    let retryCount = 0;
-    const maxRetries = 10;
-    const focusWithRetry = () => {
-      retryCount++;
-      console.log(`[TabStore] 🎯 Focus attempt ${retryCount}/${maxRetries} for tab:`, id);
-      
-      // 首先确保浏览器窗口获得焦点
-      window.focus();
-      
-      // 尝试聚焦到标签页容器
-      const container = document.getElementById(`tab-container-${id}`);
-      if (container) {
-        container.focus();
-        console.log('[TabStore] ✅ Focused new tab container:', id);
-        return; // 成功，停止重试
-      }
-      
-      // 如果还没找到，继续重试
-      if (retryCount < maxRetries) {
-        setTimeout(focusWithRetry, 100); // 每 100ms 重试一次
-      } else {
-        console.warn('[TabStore] ⚠️ Failed to focus tab container after', maxRetries, 'attempts');
-      }
-    };
-    
-    // 开始第一次聚焦尝试
-    setTimeout(focusWithRetry, 50);
+    // 暴露给 Electron 主进程（用于 Electron Bridge 工具）
+    if (typeof window !== 'undefined') {
+      (window as any).__cosurf_activeTabId = id;
+    }
 
     return id;
   },
@@ -283,3 +227,21 @@ export const useTabStore = create<TabState>((set, get) => ({
       : false;
   },
 }));
+
+// 初始化时暴露 activeTabId 给 Electron 主进程
+if (typeof window !== 'undefined') {
+  const initialState = useTabStore.getState();
+  (window as any).__cosurf_activeTabId = initialState.activeTabId;
+  
+  // 暴露 navigateTo 和 updateTab 函数给 Electron 主进程
+  const state = useTabStore.getState();
+  (window as any).__cosurf_navigateTo = state.navigateTo;
+  (window as any).__cosurf_updateTab = state.updateTab;
+  
+  // 监听 store 变化，保持全局变量同步
+  useTabStore.subscribe((newState, prevState) => {
+    if (newState.activeTabId !== prevState.activeTabId) {
+      (window as any).__cosurf_activeTabId = newState.activeTabId;
+    }
+  });
+}

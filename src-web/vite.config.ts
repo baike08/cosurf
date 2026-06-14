@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-const host = process.env.TAURI_DEV_HOST;
+const host = process.env.TAURI_DEV_HOST || process.env.ELECTRON_DEV_HOST;
 
 export default defineConfig({
   plugins: [react()],
@@ -23,15 +23,13 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      ignored: ["**/src-tauri/**", "**/native/**", "**/electron/**"],
     },
   },
-  envPrefix: ["VITE_", "TAURI_"],
+  envPrefix: ["VITE_", "TAURI_", "ELECTRON_"],
   build: {
-    target: process.env.TAURI_ENV_PLATFORM === "windows"
-      ? "chrome105"
-      : "safari14",
-    minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
-    sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    target: "chrome120",
+    minify: "esbuild",
+    sourcemap: !!process.env.VITE_DEBUG,
   },
 });

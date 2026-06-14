@@ -20,10 +20,8 @@
         "minHeight": 680,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true,
+        "decorations": false,
         "center": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
         "useHttpsScheme": true,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }
@@ -61,8 +59,8 @@
       "wix": null
     },
     "licenseFile": "../LICENSE",
-    "shortDescription": "CoSurf - AI Native Browser",
-    "longDescription": "CoSurf（伴游）是一款 AI 原生的桌面浏览器，集成多模型 AI 对话、网页操作 Agent、智能总结等能力，让浏览更智能。"
+    "shortDescription": "CoSurf - AI 阅读伴侣",
+    "longDescription": "CoSurf（伴游）是你的 AI 阅读伴侣和思考搭档。读过的，都算数。帮你读得更深、记得更牢、想得更快。"
   },
   "plugins": {
     "updater": {

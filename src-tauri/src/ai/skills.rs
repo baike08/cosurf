@@ -171,13 +171,17 @@ impl SkillsManager {
 
     /// 从 Skills 目录加载所有 Skills（仅解析 frontmatter，懒加载 body）
     pub fn load_skills_from_directory(&mut self) -> AppResult<usize> {
+        info!(path = ?self.skills_dir, "Starting to load skills from directory");
+        
         if !self.skills_dir.exists() {
+            info!(path = ?self.skills_dir, "Skills directory does not exist, creating it");
             std::fs::create_dir_all(&self.skills_dir)
                 .map_err(|e| AppError::Internal(format!("Failed to create skills directory: {}", e)))?;
             return Ok(0);
         }
 
         let mut count = 0;
+        let mut total_dirs = 0;
 
         for entry in std::fs::read_dir(&self.skills_dir)
             .map_err(|e| AppError::Internal(format!("Failed to read skills directory: {}", e)))?
@@ -195,12 +199,17 @@ impl SkillsManager {
             if !path.is_dir() {
                 continue;
             }
+            
+            total_dirs += 1;
+            info!(dir = ?path, "Found skill directory");
 
             let skill_md_path = path.join("SKILL.md");
             if !skill_md_path.exists() {
                 warn!(dir = ?path, "No SKILL.md found in directory, skipping");
                 continue;
             }
+            
+            info!(dir = ?path, "Found SKILL.md file");
 
             let dir_name = match path.file_name().and_then(|n| n.to_str()) {
                 Some(name) => name.to_string(),
@@ -215,7 +224,7 @@ impl SkillsManager {
             }
         }
 
-        info!(loaded = count, path = ?self.skills_dir, "Loaded skills from directory");
+        info!(loaded = count, total_dirs = total_dirs, path = ?self.skills_dir, "Finished loading skills from directory");
         Ok(count)
     }
 

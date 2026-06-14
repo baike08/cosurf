@@ -6,12 +6,13 @@ import { BrowserActionPanel } from "./BrowserActionPanel";
 import { WebView2Container } from "./WebView2Container";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { ScreenshotOverlay } from "@/components/ui/ScreenshotOverlay";
+import { ToolboxPanel } from "./ToolboxPanel";
 import { useUIStore } from "@/stores/uiStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useConversationStore } from "@/stores/conversationStore";
 import { useTabStore } from "@/stores/tabStore";
 import { useEffect, useRef, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { on } from "@/lib/events";
 
 export function AppLayout() {
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
@@ -20,6 +21,67 @@ export function AppLayout() {
   const browserActionPanelOpen = useUIStore((s) => s.browserActionPanelOpen);
   const loadModels = useSettingsStore((s) => s.loadModels);
   const loadConversations = useConversationStore((s) => s.loadConversations);
+
+  // ========== 全局快捷键 ==========
+  const toggleAIPanel = useUIStore((s) => s.toggleAIPanel);
+  const addTab = useTabStore((s) => s.addTab);
+  const closeTab = useTabStore((s) => s.closeTab);
+  const createConversation = useConversationStore((s) => s.createConversation);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey;
+      const shift = e.shiftKey;
+      const key = e.key.toLowerCase();
+
+      // 忽略输入框内的快捷键（除了 Ctrl 组合键）
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      if (isInput && !ctrl) return;
+
+      // Ctrl+J — 切换 AI 面板
+      if (ctrl && !shift && key === 'j') {
+        e.preventDefault();
+        toggleAIPanel();
+        return;
+      }
+
+      // Ctrl+T — 新建标签页
+      if (ctrl && !shift && key === 't') {
+        e.preventDefault();
+        addTab();
+        return;
+      }
+
+      // Ctrl+W — 关闭当前标签页
+      if (ctrl && !shift && key === 'w') {
+        e.preventDefault();
+        const { activeTabId } = useTabStore.getState();
+        if (activeTabId) closeTab(activeTabId);
+        return;
+      }
+
+      // Ctrl+L — 聚焦地址栏
+      if (ctrl && !shift && key === 'l') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('cosurf:focus-address-bar'));
+        return;
+      }
+
+      // Ctrl+Shift+N — 新建对话
+      if (ctrl && shift && key === 'n') {
+        e.preventDefault();
+        // 确保 AI 面板打开
+        const { aiPanelOpen } = useUIStore.getState();
+        if (!aiPanelOpen) toggleAIPanel();
+        createConversation();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleAIPanel, addTab, closeTab, createConversation]);
 
   // 应用启动时加载模型和对话列表
   useEffect(() => {
@@ -53,46 +115,37 @@ export function AppLayout() {
       }
     }, 30000);
     
-    const unlisten = listen<{ requestId: string; url: string; title: string }>(
+    const unlisten = on<{ requestId: string; url: string; title: string }>(
       'webview:create-tab',
-      async (event) => {
-        const { requestId, url, title } = event.payload;
-        console.log('[AppLayout] 📥 Received create-tab request:', { requestId, url, title });
+      async (payload) => {
+        const { requestId, url, title } = payload;
         
         // 检查是否是重复请求（相同的 URL 在 2 秒内）
         const now = Date.now();
         const lastRequestTime = recentRequests.current.get(url);
         if (lastRequestTime && now - lastRequestTime < 2000) {
-          console.log('[AppLayout] ⚠️ Duplicate request detected, ignoring:', url, `(last: ${now - lastRequestTime}ms ago)`);
           return;
         }
         recentRequests.current.set(url, now);
         
         try {
-          // 创建新标签页（addTab 内部已经设置为 active 并聚焦）
           const addTab = useTabStore.getState().addTab;
           const newTabId = addTab(url, title);
-          console.log('[AppLayout] ✅ New tab created:', { newTabId, url, title });
-          
-          // 【移除重复调用】addTab 已经调用了 set_active_tab
-          // 不需要再次调用 invoke('set_active_tab')
           
           // 通知后端新标签页 ID
-          const { emit } = await import('@tauri-apps/api/event');
-          await emit('cosurf:new-tab-response', {
+          window.electronAPI?.send('cosurf:new-tab-response', {
             requestId,
             tabId: newTabId
           });
-          console.log('[AppLayout] 📤 Sent new-tab-response');
         } catch (error) {
-          console.error('[AppLayout] ❌ Failed to create tab:', error);
+          console.error('[AppLayout] Failed to create tab:', error);
         }
       }
     );
     
     return () => {
       clearInterval(cleanupInterval);
-      unlisten.then(fn => fn());
+      unlisten();
     };
   }, []);
 
@@ -139,10 +192,8 @@ export function AppLayout() {
           />
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden bg-surface-secondary relative">
-            <WebView2Container />
-          </div>
+        <div className="flex-1 overflow-hidden bg-surface-secondary flex flex-col min-h-0">
+          <WebView2Container />
         </div>
 
         {browserActionPanelOpen && <BrowserActionPanel />}
@@ -150,6 +201,7 @@ export function AppLayout() {
       </div>
 
       <SettingsPage />
+      <ToolboxPanel />
       <ScreenshotOverlay />
     </div>
   );

@@ -18,9 +18,11 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { IconButton } from "@/components/ui/IconButton";
 import { cn } from "@/lib/utils";
 import { MODEL_PROVIDER_PRESETS, BUILT_IN_TOOLS } from "@cosurf/shared";
+import { db } from "@/lib/api";
 import type { ThemeMode, ModelConfig } from "@cosurf/shared";
 import { SkillsSettings } from "./SkillsSettings";
 import { McpServersSettings } from "./McpServersSettings";
+import { AgentPromptsSettings } from "./AgentPromptsSettings";
 import { useState, useEffect } from "react";
 
 const navItems: { id: SettingsView; icon: typeof Monitor; label: string }[] = [
@@ -29,6 +31,7 @@ const navItems: { id: SettingsView; icon: typeof Monitor; label: string }[] = [
   { id: "tools", icon: Wrench, label: "工具" },
   { id: "skills", icon: Code, label: "Skills" },
   { id: "mcp", icon: Server, label: "MCP Servers" },
+  { id: "agent-prompts", icon: Edit, label: "Agent Prompts" },
   { id: "shortcuts", icon: Keyboard, label: "快捷键" },
 ];
 
@@ -38,8 +41,8 @@ export function SettingsPage() {
   const settingsView = useUIStore((s) => s.settingsView);
   const setSettingsView = useUIStore((s) => s.setSettingsView);
   const loadModels = useSettingsStore((s) => s.loadModels);
-  const loadSkillsDirectory = useSettingsStore((s) => s.loadSkillsDirectory);
-  const loadIqsApiKey = useSettingsStore((s) => s.loadIqsApiKey);
+  const setSkillsDirectory = useSettingsStore((s) => s.setSkillsDirectory);
+  const setIqsApiKey = useSettingsStore((s) => s.setIqsApiKey);
 
   // 当设置页面打开时，加载模型列表
   useEffect(() => {
@@ -48,21 +51,43 @@ export function SettingsPage() {
     }
   }, [settingsOpen, settingsView, loadModels]);
 
-  // 当切换到 skills 标签时，加载 Skills 目录配置
+  // 当切换到 skills 标签时，加载 Skills 目录配置和 Skills 列表
   useEffect(() => {
     if (settingsOpen && settingsView === "skills") {
-      console.log('[SettingsPage] Switched to skills tab, loading directory...');
-      loadSkillsDirectory();
+      console.log('[SettingsPage] Switched to skills tab, loading directory and skills...');
+      db.getSkillsDirectory().then(dir => {
+        console.log('[SettingsPage] Skills directory:', dir);
+        setSkillsDirectory(dir || "");
+      }).catch(console.error);
     }
-  }, [settingsOpen, settingsView, loadSkillsDirectory]);
+  }, [settingsOpen, settingsView, setSkillsDirectory]);
 
   // 当切换到 tools 标签时，加载 IQS API Key
   useEffect(() => {
     if (settingsOpen && settingsView === "tools") {
       console.log('[SettingsPage] Switched to tools tab, loading IQS config...');
-      loadIqsApiKey();
+      db.getIqsApiKey().then(key => {
+        console.log('[SettingsPage] IQS API key:', key ? '***' + key.slice(-4) : 'null');
+        setIqsApiKey(key || "");
+      }).catch(console.error);
     }
-  }, [settingsOpen, settingsView, loadIqsApiKey]);
+  }, [settingsOpen, settingsView, setIqsApiKey]);
+
+  // 首次打开设置页面时，预加载所有配置（避免切换标签时才加载）
+  useEffect(() => {
+    if (settingsOpen) {
+      console.log('[SettingsPage] Settings opened, preloading all configs...');
+      db.getSkillsDirectory().then(dir => {
+        console.log('[SettingsPage] Skills directory:', dir);
+        setSkillsDirectory(dir || "");
+      }).catch(console.error);
+      
+      db.getIqsApiKey().then(key => {
+        console.log('[SettingsPage] IQS API key:', key ? '***' + key.slice(-4) : 'null');
+        setIqsApiKey(key || "");
+      }).catch(console.error);
+    }
+  }, [settingsOpen, setSkillsDirectory, setIqsApiKey]);
 
   if (!settingsOpen) return null;
 
@@ -110,6 +135,7 @@ export function SettingsPage() {
             {settingsView === "tools" && <ToolSettings />}
             {settingsView === "skills" && <SkillsSettings />}
             {settingsView === "mcp" && <McpServersSettings />}
+            {settingsView === "agent-prompts" && <AgentPromptsSettings />}
             {settingsView === "shortcuts" && <ShortcutSettings />}
           </div>
         </div>

@@ -1,0 +1,71 @@
+[package]
+name = "cosurf-native"
+version = "0.1.0"
+edition = "2021"
+description = "CoSurf Native Module - High-performance Rust addon for Electron"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# N-API bindings
+napi = { version = "2", features = ["async", "serde-json", "napi9"] }
+napi-derive = "2"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# HTTP client (for LLM API calls)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+futures = "0.3"
+
+# Error handling
+thiserror = "2.0"
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = "2.5"
+lazy_static = "1.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTML processing
+sha2 = "0.10"
+base64 = "0.22"
+regex = "1.10"
+
+# Skills / Markdown parsing
+serde_yaml = "0.9"
+markdown = "1.0"
+
+# Directory handling
+dirs = "5.0"
+
+# Screenshot / Image processing
+image = "0.25"
+xcap = "0.3"
+arboard = "3.4"
+
+# Async trait
+async-trait = "0.1"
+
+# URL encoding
+tokio-util = { version = "0.7", features = ["io"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+opt-level = "s"
+strip = true

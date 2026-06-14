@@ -313,8 +313,55 @@ async fn get_mcp_tools_schemas_async(app: &tauri::AppHandle) -> Option<Vec<serde
             | crate::db::settings::McpServerType::StreamableHttp => McpTransport::StreamableHttp,
             crate::db::settings::McpServerType::Sse => McpTransport::Sse,
             crate::db::settings::McpServerType::Stdio => {
-                tracing::warn!("MCP server '{}' is stdio type, skipping tool discovery in Agent Loop", server.name);
-                continue;
+                // stdio 模式：启动子进程并获取工具列表
+                tracing::info!("🔧 MCP server '{}' is stdio type, connecting via subprocess", server.name);
+                
+                let command = match &server.command {
+                    Some(cmd) => cmd.clone(),
+                    None => {
+                        tracing::warn!("MCP server '{}' has no command for stdio mode, skipping", server.name);
+                        continue;
+                    }
+                };
+                
+                let args: Vec<String> = server.args.clone().unwrap_or_default();
+                
+                // 转换 env: Option<Map<String, Value>> -> Option<HashMap<String, String>>
+                let env = server.env.as_ref().map(|env_map| {
+                    env_map.iter()
+                        .filter_map(|(k, v)| {
+                            v.as_str().map(|s| (k.clone(), s.to_string()))
+                        })
+                        .collect::<std::collections::HashMap<String, String>>()
+                });
+                
+                // 连接 stdio MCP Server（带超时保护）
+                let tools_result = tokio::time::timeout(
+                    std::time::Duration::from_secs(15),
+                    fetch_stdio_mcp_server_tools(command, args, env)
+                ).await;
+                
+                let mcp_tools = match tools_result {
+                    Ok(Ok(tools)) => {
+                        tracing::info!("MCP server '{}' (stdio) returned {} tools", server.name, tools.len());
+                        tools
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!("Failed to fetch tools from MCP server '{}' (stdio): {}", server.name, e);
+                        continue;
+                    }
+                    Err(_) => {
+                        tracing::warn!("Timeout fetching tools from MCP server '{}' (stdio)", server.name);
+                        continue;
+                    }
+                };
+                
+                // 注册 stdio 工具
+                for tool in mcp_tools {
+                    register_mcp_tool(&mut schemas, &mut registry, &server_safe_name, &server.name, tool);
+                }
+                
+                continue; // 已处理完毕，跳过后续的 HTTP 逻辑
             }
         };
         
@@ -349,37 +396,7 @@ async fn get_mcp_tools_schemas_async(app: &tauri::AppHandle) -> Option<Vec<serde
         
         // 将每个 MCP 工具注册为独立的 function
         for tool in mcp_tools {
-            let tool_name = match tool.get("name").and_then(|v| v.as_str()) {
-                Some(n) => n,
-                None => continue,
-            };
-            let tool_desc = tool.get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let input_schema = tool.get("inputSchema")
-                .cloned()
-                .unwrap_or(serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": true
-                }));
-            
-            // 函数名: mcp_{server}_{tool}
-            let func_name = format!("mcp_{}_{}", server_safe_name, tool_name.replace("-", "_"));
-            let description = format!("[MCP:{}] {}", server.name, tool_desc);
-            
-            registry.insert(func_name.clone(), (server.name.clone(), tool_name.to_string()));
-            
-            let schema = serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": func_name,
-                    "description": description,
-                    "parameters": input_schema
-                }
-            });
-            
-            schemas.push(schema);
+            register_mcp_tool(&mut schemas, &mut registry, &server_safe_name, &server.name, tool);
         }
     }
     
@@ -393,6 +410,47 @@ async fn get_mcp_tools_schemas_async(app: &tauri::AppHandle) -> Option<Vec<serde
     }
     
     Some(schemas)
+}
+
+/// 注册单个 MCP 工具到 schema 和 registry
+fn register_mcp_tool(
+    schemas: &mut Vec<serde_json::Value>,
+    registry: &mut std::collections::HashMap<String, (String, String)>,
+    server_safe_name: &str,
+    server_name: &str,
+    tool: serde_json::Value,
+) {
+    let tool_name = match tool.get("name").and_then(|v| v.as_str()) {
+        Some(n) => n,
+        None => return,
+    };
+    let tool_desc = tool.get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let input_schema = tool.get("inputSchema")
+        .cloned()
+        .unwrap_or(serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+        }));
+    
+    // 函数名: mcp_{server}_{tool}
+    let func_name = format!("mcp_{}_{}", server_safe_name, tool_name.replace("-", "_"));
+    let description = format!("[MCP:{}] {}", server_name, tool_desc);
+    
+    registry.insert(func_name.clone(), (server_name.to_string(), tool_name.to_string()));
+    
+    let schema = serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": func_name,
+            "description": description,
+            "parameters": input_schema
+        }
+    });
+    
+    schemas.push(schema);
 }
 
 /// 连接 MCP Server 并拉取 tools/list
@@ -412,6 +470,151 @@ async fn fetch_mcp_server_tools(
         .and_then(|v| v.as_array())
         .cloned()
         .unwrap_or_default();
+    
+    Ok(tools)
+}
+
+/// 通过 stdio 连接 MCP Server 并拉取 tools/list
+async fn fetch_stdio_mcp_server_tools(
+    command: String,
+    args: Vec<String>,
+    env: Option<std::collections::HashMap<String, String>>,
+) -> crate::error::AppResult<Vec<serde_json::Value>> {
+    use tokio::process::Command;
+    use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+    use std::time::Duration;
+    
+    tracing::info!("🚀 Starting stdio MCP server: {} {:?}", command, args);
+    
+    // 启动子进程
+    let mut child = Command::new(&command)
+        .args(&args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to spawn process: {}", e)))?;
+    
+    let mut stdin = child.stdin.take()
+        .ok_or_else(|| crate::error::AppError::Internal("Failed to get stdin".to_string()))?;
+    let stdout = child.stdout.take()
+        .ok_or_else(|| crate::error::AppError::Internal("Failed to get stdout".to_string()))?;
+    let stderr = child.stderr.take()
+        .ok_or_else(|| crate::error::AppError::Internal("Failed to get stderr".to_string()))?;
+    
+    let mut reader = BufReader::new(stdout);
+    let mut stderr_reader = BufReader::new(stderr);
+    
+    // 读取 stderr 日志（非阻塞）
+    tokio::spawn(async move {
+        let mut line = String::new();
+        while let Ok(n) = stderr_reader.read_line(&mut line).await {
+            if n == 0 { break; }
+            tracing::debug!("MCP stderr: {}", line.trim());
+            line.clear();
+        }
+    });
+    
+    // 发送 initialize 请求
+    let init_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {
+                "name": "cosurf-agent",
+                "version": "0.1.0"
+            }
+        }
+    });
+    
+    let init_str = serde_json::to_string(&init_request)
+        .map_err(|e| crate::error::AppError::Internal(format!("JSON serialization failed: {}", e)))?;
+    stdin.write_all(init_str.as_bytes()).await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write to stdin: {}", e)))?;
+    stdin.write_all(b"\n").await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write newline: {}", e)))?;
+    stdin.flush().await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to flush stdin: {}", e)))?;
+    
+    tracing::debug!("Sent initialize request");
+    
+    // 读取 initialize 响应
+    let mut response_line = String::new();
+    match tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut response_line)).await {
+        Ok(Ok(_)) => {},
+        Ok(Err(e)) => return Err(crate::error::AppError::Internal(format!("Failed to read response: {}", e))),
+        Err(_) => return Err(crate::error::AppError::Internal("Timeout waiting for initialize response".to_string())),
+    }
+    
+    let init_response: serde_json::Value = serde_json::from_str(&response_line)
+        .map_err(|e| crate::error::AppError::Internal(format!("Invalid initialize response: {}", e)))?;
+    
+    tracing::debug!("Received initialize response: {}", serde_json::to_string_pretty(&init_response).unwrap_or_default());
+    
+    // 发送 initialized 通知
+    let initialized_notification = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    });
+    
+    let notif_str = serde_json::to_string(&initialized_notification)
+        .map_err(|e| crate::error::AppError::Internal(format!("JSON serialization failed: {}", e)))?;
+    stdin.write_all(notif_str.as_bytes()).await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write notification: {}", e)))?;
+    stdin.write_all(b"\n").await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write newline: {}", e)))?;
+    stdin.flush().await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to flush stdin: {}", e)))?;
+    
+    tracing::debug!("Sent initialized notification");
+    
+    // 发送 tools/list 请求
+    let tools_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    });
+    
+    let tools_str = serde_json::to_string(&tools_request)
+        .map_err(|e| crate::error::AppError::Internal(format!("JSON serialization failed: {}", e)))?;
+    stdin.write_all(tools_str.as_bytes()).await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write tools request: {}", e)))?;
+    stdin.write_all(b"\n").await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to write newline: {}", e)))?;
+    stdin.flush().await
+        .map_err(|e| crate::error::AppError::Internal(format!("Failed to flush stdin: {}", e)))?;
+    
+    tracing::debug!("Sent tools/list request");
+    
+    // 读取 tools/list 响应
+    let mut tools_line = String::new();
+    match tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut tools_line)).await {
+        Ok(Ok(_)) => {},
+        Ok(Err(e)) => return Err(crate::error::AppError::Internal(format!("Failed to read tools response: {}", e))),
+        Err(_) => return Err(crate::error::AppError::Internal("Timeout waiting for tools/list response".to_string())),
+    }
+    
+    let tools_response: serde_json::Value = serde_json::from_str(&tools_line)
+        .map_err(|e| crate::error::AppError::Internal(format!("Invalid tools response: {}", e)))?;
+    
+    tracing::debug!("Received tools/list response");
+    
+    // 关闭子进程
+    let _ = child.kill().await;
+    
+    // 提取工具列表
+    let tools = tools_response.get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+    
+    tracing::info!("✅ Fetched {} tools from stdio MCP server", tools.len());
     
     Ok(tools)
 }

@@ -14,6 +14,9 @@ target/
 *.swo
 *~
 
+# doc
+docs/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -29,9 +32,25 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
+# Database & secrets
+*.db
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Tauri
 src-tauri/gen/
 src-tauri/capabilities/default.json.bak
+
+# Electron
+out/
+dist_electron/
+electron/dist/
+native/*.node
+native/target/
 
 # Misc
 .turbo/

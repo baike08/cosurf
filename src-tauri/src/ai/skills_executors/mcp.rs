@@ -251,6 +251,9 @@ impl McpClient {
         
         let response = self.send_request("tools/list", serde_json::json!({})).await?;
         
+        // send_request 已经提取了 result 字段，response 应该是 { tools: [...] }
+        // 直接返回整个 response，让前端通过 result.tools 访问
+        info!("MCP tools/list response: {}", serde_json::to_string_pretty(&response).unwrap_or_default());
         Ok(response)
     }
     

@@ -20,6 +20,24 @@ pub fn run() {
         )
         .init();
 
+    // 在 Tauri 初始化前修正窗口状态缓存，防止插件恢复 decorated: true
+    if let Some(app_data) = std::env::var_os("APPDATA") {
+        let state_file = std::path::PathBuf::from(app_data)
+            .join("com.cosurf.app")
+            .join(".window-state.json");
+        if state_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&state_file) {
+                if content.contains("\"decorated\": true") || content.contains("\"decorated\":true") {
+                    let fixed = content
+                        .replace("\"decorated\": true", "\"decorated\": false")
+                        .replace("\"decorated\":true", "\"decorated\":false");
+                    let _ = std::fs::write(&state_file, fixed);
+                    eprintln!("[CoSurf] Fixed window state: decorated -> false");
+                }
+            }
+        }
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -57,7 +75,7 @@ pub fn run() {
             // 注册全局截图快捷键 Ctrl+Shift+X
             info!("Registering global screenshot shortcut: Control+Shift+X");
             let shortcut_handle = app.handle().clone();
-            app.global_shortcut().on_shortcut("Control+Shift+X", move |_app, _shortcut, event| {
+            match app.global_shortcut().on_shortcut("Control+Shift+X", move |_app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     // 发送事件到前端，触发全屏截图
                     let h = shortcut_handle.clone();
@@ -67,8 +85,12 @@ pub fn run() {
                         }
                     });
                 }
-            }).map_err(|e| format!("Failed to register screenshot shortcut: {}", e))?;
-            info!("Global shortcut Control+Shift+X registered successfully for screenshot");
+            }) {
+                Ok(_) => info!("Global shortcut Control+Shift+X registered successfully for screenshot"),
+                Err(e) => {
+                    tracing::warn!("Failed to register screenshot shortcut (may be already registered): {}", e);
+                }
+            }
 
             // 自动更新检查
             #[cfg(feature = "updater")]

@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@/lib/tauri";
+import { on } from "@/lib/events";
+import { screenshot as screenshotApi, dialog as dialogApi } from "@/lib/api";
 
 interface ScreenshotState {
   isOpen: boolean;
@@ -36,29 +36,59 @@ export const useScreenshotStore = create<ScreenshotState>((set, get) => ({
   toast: null,
 
   init: async () => {
-    // 监听全屏截图完成事件
-    const unlistenFullscreen = await listen<{
-      image: string;
-      width: number;
-      height: number;
-    }>("screenshot-fullscreen-captured", (event) => {
-      const { image, width, height } = event.payload;
-      set({ showSelector: true, fullScreenImage: image, screenWidth: width, screenHeight: height, toast: null });
+    // 监听全局快捷键截图事件
+    const unlistenShortcut = on<void>("shortcut:screenshot", async () => {
+      console.log('[screenshotStore] 📸 Global shortcut triggered');
+      try {
+        // 触发全屏截图
+        console.log('[screenshotStore] Calling captureFull...');
+        const resultJson = await screenshotApi.captureFull();
+        console.log('[screenshotStore] captureFull succeeded, result length:', resultJson.length);
+        
+        // 解析 JSON 结果
+        const result = JSON.parse(resultJson);
+        const { image, width, height } = result;
+        
+        console.log('[screenshotStore] Parsed result: width=', width, 'height=', height, 'image length=', image.length);
+        
+        // 直接触发自定义事件（不通过 IPC）
+        window.dispatchEvent(new CustomEvent('screenshot-fullscreen-captured', {
+          detail: { image, width, height }
+        }));
+      } catch (error: any) {
+        console.error("[screenshotStore] Screenshot failed:", error);
+        set({ toast: `✗ 截图失败: ${error.message}` });
+      }
     });
 
-    // 监听裁剪后截图完成事件
-    const unlistenCaptured = await listen<{
-      image: string;
-      width: number;
-      height: number;
-    }>("screenshot-captured", (event) => {
-      const { image, width, height } = event.payload;
+    // 监听全屏截图完成事件（使用自定义事件）
+    const handleFullscreenCaptured = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        image: string;
+        width: number;
+        height: number;
+      }>;
+      const { image, width, height } = customEvent.detail;
+      set({ showSelector: true, fullScreenImage: image, screenWidth: width, screenHeight: height, toast: null });
+    };
+    window.addEventListener('screenshot-fullscreen-captured', handleFullscreenCaptured);
+
+    // 监听裁剪后截图完成事件（使用自定义事件）
+    const handleCaptured = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        image: string;
+        width: number;
+        height: number;
+      }>;
+      const { image, width, height } = customEvent.detail;
       set({ isOpen: true, showSelector: false, fullScreenImage: null, imageData: image, imageWidth: width, imageHeight: height, toast: null });
-    });
+    };
+    window.addEventListener('screenshot-captured', handleCaptured);
 
     return () => {
-      unlistenFullscreen();
-      unlistenCaptured();
+      unlistenShortcut();
+      window.removeEventListener('screenshot-fullscreen-captured', handleFullscreenCaptured);
+      window.removeEventListener('screenshot-captured', handleCaptured);
     };
   },
 
@@ -66,23 +96,39 @@ export const useScreenshotStore = create<ScreenshotState>((set, get) => ({
     set({ isOpen: false, showSelector: false, fullScreenImage: null, imageData: null, toast: null });
   },
 
-  captureRegion: (rect) => {
+  captureRegion: async (rect) => {
     const { fullScreenImage, screenWidth, screenHeight } = get();
     if (!fullScreenImage) return;
 
-    // 调用后端裁剪截图
-    invoke("capture_region_from_base64", {
-      base64Data: fullScreenImage,
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
-      screenWidth,
-      screenHeight,
-    }).catch((error) => {
-      console.error("Capture failed:", error);
-      set({ showSelector: false, fullScreenImage: null, toast: "✗ 截图失败" });
-    });
+    try {
+      console.log('[screenshotStore] Capturing region:', rect);
+      // 调用后端裁剪截图
+      const resultJson = await screenshotApi.captureRegion(
+        fullScreenImage,
+        Math.round(rect.x),
+        Math.round(rect.y),
+        Math.round(rect.width),
+        Math.round(rect.height),
+        screenWidth,
+        screenHeight,
+      );
+      
+      console.log('[screenshotStore] Capture region succeeded, result length:', resultJson.length);
+      
+      // 解析 JSON 结果
+      const result = JSON.parse(resultJson);
+      const { image, width, height } = result;
+      
+      console.log('[screenshotStore] Parsed cropped result: width=', width, 'height=', height);
+      
+      // 直接触发自定义事件（不通过 IPC）
+      window.dispatchEvent(new CustomEvent('screenshot-captured', {
+        detail: { image, width, height }
+      }));
+    } catch (error: any) {
+      console.error("[screenshotStore] Capture failed:", error);
+      set({ showSelector: false, fullScreenImage: null, toast: `✗ 截图失败: ${error.message}` });
+    }
   },
 
   copyToClipboard: async () => {
@@ -90,9 +136,7 @@ export const useScreenshotStore = create<ScreenshotState>((set, get) => ({
     if (!imageData) return;
     set({ copying: true });
     try {
-      await invoke("copy_screenshot_to_clipboard", {
-        base64Data: imageData,
-      });
+      await screenshotApi.copyToClipboard(imageData);
       set({ toast: "✓ 已复制到剪贴板" });
       setTimeout(() => get().close(), 800);
     } catch (error) {
@@ -108,17 +152,14 @@ export const useScreenshotStore = create<ScreenshotState>((set, get) => ({
     if (!imageData) return;
     set({ saving: true });
     try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const filePath = await save({
+      const result = await dialogApi.saveFile({
         title: "保存截图",
         defaultPath: `screenshot_${Date.now()}.png`,
         filters: [{ name: "PNG 图片", extensions: ["png"] }],
       });
+      const filePath = result?.filePath;
       if (filePath) {
-        await invoke("save_screenshot", {
-          base64Data: imageData,
-          path: filePath,
-        });
+        await screenshotApi.save(imageData, filePath);
         set({ toast: `✓ 已保存` });
         setTimeout(() => get().close(), 800);
       }

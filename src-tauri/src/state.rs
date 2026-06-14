@@ -28,13 +28,17 @@ impl AppState {
         let skills_dir_str = db.get_skills_directory()
             .unwrap_or_else(|_| {
                 // 如果出错，使用默认路径
-                app_data_dir.join("skills").to_string_lossy().to_string()
+                let default_path = app_data_dir.join("skills");
+                tracing::info!(path = ?default_path, "Using default skills directory");
+                default_path.to_string_lossy().to_string()
             });
         
         let skills_dir = PathBuf::from(&skills_dir_str);
+        tracing::info!(path = ?skills_dir, "Initializing SkillsManager with directory");
         
         // 确保目录存在
         if !skills_dir.exists() {
+            tracing::info!(path = ?skills_dir, "Creating skills directory");
             if let Err(e) = std::fs::create_dir_all(&skills_dir) {
                 tracing::error!(error = %e, path = ?skills_dir, "Failed to create skills directory");
             }

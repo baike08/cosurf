@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type SidebarPanel = "bookmarks" | "history" | "conversations" | "downloads" | "none";
-export type SettingsView = "general" | "models" | "tools" | "skills" | "mcp" | "shortcuts";
+export type SettingsView = "general" | "models" | "tools" | "skills" | "mcp" | "agent-prompts" | "shortcuts";
 
 interface UIState {
   sidebarOpen: boolean;
@@ -12,6 +12,7 @@ interface UIState {
   browserActionPanelOpen: boolean;
   settingsOpen: boolean;
   settingsView: SettingsView;
+  toolboxOpen: boolean;
 
   toggleSidebar: () => void;
   setSidebarPanel: (panel: SidebarPanel) => void;
@@ -22,6 +23,9 @@ interface UIState {
   openSettings: (view?: SettingsView) => void;
   closeSettings: () => void;
   setSettingsView: (view: SettingsView) => void;
+  toggleToolbox: () => void;
+  openToolbox: () => void;
+  closeToolbox: () => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -33,6 +37,7 @@ export const useUIStore = create<UIState>((set) => ({
   browserActionPanelOpen: false,
   settingsOpen: false,
   settingsView: "general",
+  toolboxOpen: false,
 
   toggleSidebar: () => {
     set((state) => ({ sidebarOpen: !state.sidebarOpen }));
@@ -77,5 +82,17 @@ export const useUIStore = create<UIState>((set) => ({
 
   setSettingsView: (view) => {
     set({ settingsView: view });
+  },
+
+  toggleToolbox: () => {
+    set((state) => ({ toolboxOpen: !state.toolboxOpen }));
+  },
+
+  openToolbox: () => {
+    set({ toolboxOpen: true });
+  },
+
+  closeToolbox: () => {
+    set({ toolboxOpen: false });
   },
 }));
