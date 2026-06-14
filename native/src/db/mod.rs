@@ -1,7 +1,10 @@
 //! SQLite 数据库模块 (N-API)
 //!
 //! 从 src-tauri/src/db/ 迁移，移除 Tauri 依赖，通过 napi-rs 导出。
-//! 包含: conversations, messages, bookmarks, bookmark_folders, history, settings, model_configs, mcp_servers
+//! 包含: conversations, messages, bookmarks, bookmark_folders, history, settings, model_configs, mcp_servers, user_events
+
+// 模块化数据库实体（渐进式重构）
+pub mod user_events;
 
 use napi::bindgen_prelude::*;
 use rusqlite::{params, Connection};
@@ -237,7 +240,17 @@ impl Database {
             )?;
         }
 
+        // 创建用户行为事件表
+        self.create_user_events_table()?;
+
         Ok(())
+    }
+}
+
+// 在 Database::run_migrations 中调用（需要在 run_migrations 末尾添加）
+impl Database {
+    pub fn create_user_events_table(&self) -> AppResult<()> {
+        user_events::create_user_events_table(self.conn())
     }
 }
 
@@ -1630,4 +1643,92 @@ pub fn db_load_mcp_servers(servers_json: String) -> Result<()> {
     });
     
     Ok(())
+}
+
+// ===== User Events (用户行为事件) =====
+
+/// 插入用户行为事件
+#[napi]
+pub fn db_insert_user_event(event_json: String) -> Result<()> {
+    let event: user_events::UserEvent = serde_json::from_str(&event_json)
+        .map_err(|e| Error::from_reason(format!("Failed to parse event: {}", e)))?;
+    
+    with_db(|db| {
+        user_events::insert_user_event(db.conn(), &event)
+    })?;
+    
+    Ok(())
+}
+
+/// 批量插入用户行为事件
+#[napi]
+pub fn db_batch_insert_user_events(events_json: String) -> Result<u32> {
+    let events: Vec<user_events::UserEvent> = serde_json::from_str(&events_json)
+        .map_err(|e| Error::from_reason(format!("Failed to parse events: {}", e)))?;
+    
+    let count = with_db(|db| {
+        user_events::batch_insert_user_events(db.conn(), &events)
+    })?;
+    
+    Ok(count as u32)
+}
+
+/// 清理超过 3 天的旧事件
+#[napi]
+pub fn db_cleanup_old_user_events() -> Result<u32> {
+    let count = with_db(|db| {
+        user_events::cleanup_old_user_events(db.conn(), 3) // 保留 3 天
+    })?;
+    
+    Ok(count as u32)
+}
+
+/// 获取最近的用户行为事件
+#[napi]
+pub fn db_get_user_events(hours: i64, limit: i64) -> Result<String> {
+    let end_time = chrono::Utc::now().timestamp_millis();
+    let start_time = end_time - (hours * 60 * 60 * 1000);
+    
+    let events = with_db(|db| {
+        user_events::get_user_events(db.conn(), start_time, end_time, limit)
+    })?;
+    
+    serde_json::to_string(&events)
+        .map_err(|e| Error::from_reason(format!("Failed to serialize events: {}", e)))
+}
+
+/// 获取事件统计
+#[napi]
+pub fn db_get_event_stats(event_type: String, days: i64) -> Result<String> {
+    let event_type: user_events::EventType = event_type.parse()
+        .map_err(|e| Error::from_reason(e))?;
+    
+    let stats = with_db(|db| {
+        user_events::get_event_stats(db.conn(), &event_type, days)
+    })?;
+    
+    serde_json::to_string(&stats)
+        .map_err(|e| Error::from_reason(format!("Failed to serialize stats: {}", e)))
+}
+
+/// 获取页面停留统计
+#[napi]
+pub fn db_get_page_stay_stats(url: String, days: i64) -> Result<String> {
+    let stats = with_db(|db| {
+        user_events::get_page_stay_stats(db.conn(), &url, days)
+    })?;
+    
+    serde_json::to_string(&stats)
+        .map_err(|e| Error::from_reason(format!("Failed to serialize stats: {}", e)))
+}
+
+/// 获取最活跃的标签页
+#[napi]
+pub fn db_get_most_active_tabs(limit: i64) -> Result<String> {
+    let tabs = with_db(|db| {
+        user_events::get_most_active_tabs(db.conn(), limit)
+    })?;
+    
+    serde_json::to_string(&tabs)
+        .map_err(|e| Error::from_reason(format!("Failed to serialize tabs: {}", e)))
 }
