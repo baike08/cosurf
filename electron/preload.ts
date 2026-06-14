@@ -62,6 +62,15 @@ const ALLOWED_INVOKE_CHANNELS = [
   'db:delete_model_config',
   'db:get_skills_directory',
   'db:set_skills_directory',
+  // User Events (用户行为事件)
+  'db:insert_user_event',
+  'db:batch_insert_user_events',
+  'db:cleanup_old_user_events',
+  'db:get_user_events',
+  'db:get_event_stats',
+  'db:get_page_stay_stats',
+  'db:get_most_active_tabs',
+  // MCP Servers
   'db:list_mcp_servers',
   'db:get_mcp_server',
   'db:create_mcp_server',

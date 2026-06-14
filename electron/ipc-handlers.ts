@@ -200,6 +200,9 @@ export function registerIpcHandlers(tabManager: TabManager, mainWindow: BrowserW
     'list_model_configs', 'get_model_config', 'get_active_model',
     'create_model_config', 'update_model_config', 'set_active_model', 'delete_model_config',
     'get_skills_directory', 'set_skills_directory',
+    // User Events (用户行为事件)
+    'insert_user_event', 'batch_insert_user_events', 'cleanup_old_user_events',
+    'get_user_events', 'get_event_stats', 'get_page_stay_stats', 'get_most_active_tabs',
     'list_mcp_servers', 'get_mcp_server', 'create_mcp_server',
     'update_mcp_server', 'delete_mcp_server', 'test_mcp_server',
     'import_mcp_servers_from_json',

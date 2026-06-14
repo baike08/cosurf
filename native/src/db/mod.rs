@@ -241,7 +241,9 @@ impl Database {
         }
 
         // 创建用户行为事件表
+        tracing::info!("🔧 Creating user_events table in migrations...");
         self.create_user_events_table()?;
+        tracing::info!("✅ user_events table migration completed");
 
         Ok(())
     }

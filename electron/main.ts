@@ -14,6 +14,7 @@ import { app, BrowserWindow, globalShortcut, protocol, session } from 'electron'
 import path from 'path';
 import { TabManager } from './window-manager';
 import { registerIpcHandlers } from './ipc-handlers';
+import { initEventTracker } from './modules/event-tracker';
 import { setupNetworkInterception } from './network-interceptor';
 
 // ===== 全局变量 =====
@@ -198,10 +199,13 @@ app.whenReady().then(async () => {
   // 5. 注册 IPC 处理器
   registerIpcHandlers(tabManager, mainWindow);
 
-  // 6. 注册全局快捷键
+  // 6. 初始化事件追踪器
+  initEventTracker(tabManager, mainWindow);
+
+  // 7. 注册全局快捷键
   registerGlobalShortcuts();
 
-  // 7. 创建一个默认标签页
+  // 8. 创建一个默认标签页
   tabManager.createTab('tab-initial', 'about:blank', '新标签页');
 
   console.log('[CoSurf] === Application Started ===');

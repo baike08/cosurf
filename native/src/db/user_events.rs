@@ -152,6 +152,8 @@ pub struct UserEvent {
 
 /// 创建用户行为事件表
 pub fn create_user_events_table(conn: &Connection) -> AppResult<()> {
+    tracing::info!("📊 Creating user_events table...");
+    
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS user_events (
@@ -171,6 +173,8 @@ pub fn create_user_events_table(conn: &Connection) -> AppResult<()> {
         CREATE INDEX IF NOT EXISTS idx_user_events_tab_id ON user_events(tab_id);
         "#
     )?;
+    
+    tracing::info!("✅ user_events table created successfully");
     
     Ok(())
 }
