@@ -650,6 +650,31 @@ function WebPageView({
     };
   }, [tab.isLoading, tab.url]);
 
+  // 【新增】监听 webview 加载完成事件，通知主进程进行内容提取
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) return;
+    
+    const handleDidFinishLoad = () => {
+      console.log('[WebPageView] 📥 Webview finished loading:', webview.getURL());
+      
+      // 发送加载完成事件给主进程
+      if (window.electronAPI) {
+        window.electronAPI.send('webview:did-finish-load', {
+          tabId: tab.id,
+          url: webview.getURL(),
+          title: document.title || webview.getTitle() || '',
+        });
+      }
+    };
+    
+    webview.addEventListener('did-finish-load', handleDidFinishLoad);
+    
+    return () => {
+      webview.removeEventListener('did-finish-load', handleDidFinishLoad);
+    };
+  }, [tab.id]);
+
   // 监听后端发来的导航事件
   useEffect(() => {
     const unlistenNavigating = on<any>('webview:navigating', (payload) => {
@@ -665,7 +690,7 @@ function WebPageView({
         });
       }
     });
-
+  
     const unlistenReload = on<any>('webview:reload', (payload) => {
       const { tabId } = payload;
       if (tabId === tab.id && iframeRef.current) {
@@ -673,7 +698,7 @@ function WebPageView({
         iframeRef.current.src = iframeRef.current.src;
       }
     });
-
+  
     // 监听获取页面内容事件（用于AI总结）
     const unlistenGetContent = on<any>('webview:get-content', async (payload) => {
       console.log('[WebPageView] 📥 Received webview:get-content event:', payload);
@@ -684,7 +709,7 @@ function WebPageView({
         matches: tabId === tab.id,
         hasIframe: !!iframeRef.current
       });
-      
+        
       if (tabId === tab.id && iframeRef.current) {
         console.log('[WebPageView] ✅ Tab ID matches, processing request');
         try {
@@ -697,17 +722,17 @@ function WebPageView({
             });
             return;
           }
-          
+            
           console.log('[WebPageView] ✅ Can access iframe content, executing script');
           // 执行脚本获取页面内容
           const result = iframeDoc.defaultView?.eval(script);
           console.log('[WebPageView] ✅ Script executed, result length:', result?.length);
-          
+            
           // 通过自定义事件返回结果
           window.dispatchEvent(new CustomEvent('cosurf:page-content', {
             detail: { tabId, content: result }
           }));
-          
+            
           // 发送响应给后端
           console.log('[WebPageView] 📤 Sending page content response to backend...');
           await tabApi.getState(tabId);
@@ -718,7 +743,7 @@ function WebPageView({
           window.dispatchEvent(new CustomEvent('cosurf:page-content-error', {
             detail: { tabId, error: String(error) }
           }));
-          
+            
           // 发送错误响应
           console.log('[WebPageView] 📤 Sending error response to backend...');
           await tabApi.getState(tabId).catch((err: any) => {
@@ -733,11 +758,96 @@ function WebPageView({
         });
       }
     });
-
+  
+    // 【新增】监听后端发来的内容提取请求
+    const unlistenExtractContent = on<any>('webview:extract-content', async (payload) => {
+      const { tabId, url } = payload;
+      console.log('[WebPageView] 📥 Received extract-content request:', { tabId, url });
+        
+      if (tabId !== tab.id) {
+        console.log('[WebPageView] ⏭️  Tab ID mismatch, skipping');
+        return;
+      }
+        
+      const webview = webviewRef.current;
+      if (!webview) {
+        console.warn('[WebPageView] ❌ Webview not ready');
+        return;
+      }
+        
+      try {
+        console.log('[WebPageView] 🚀 Injecting Readability script...');
+          
+        // 注入 Readability 并执行提取
+        const result = await webview.executeJavaScript(`
+          (async function() {
+            try {
+              // 1. 加载 Readability
+              if (!window.Readability) {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/@mozilla/readability@0.4.4/Readability.min.js';
+                document.head.appendChild(script);
+                await new Promise(resolve => script.onload = resolve);
+              }
+                
+              // 2. 执行提取
+              const doc = new Readability(document.cloneNode(true), {
+                charThreshold: 500,
+                keepClasses: false,
+                nbTopCandidates: 5,
+              });
+                
+              const article = doc.parse();
+                
+              if (!article || !article.content) {
+                return JSON.stringify({ error: 'No readable content found' });
+              }
+                
+              // 3. 返回结果
+              return JSON.stringify({
+                title: article.title || document.title,
+                content: article.content,
+                excerpt: article.excerpt || '',
+              });
+            } catch (err) {
+              return JSON.stringify({ error: err.message });
+            }
+          })();
+        `, true); // true 表示在用户手势上下文中执行
+          
+        console.log('[WebPageView] ✅ Readability extraction completed');
+          
+        // 解析结果
+        const article = JSON.parse(result);
+          
+        if (article.error) {
+          console.warn('[WebPageView] ⚠️  Extraction failed:', article.error);
+          return;
+        }
+          
+        // 发送到主进程
+        console.log('[WebPageView] 📤 Sending extracted content to backend...');
+        if (window.electronAPI) {
+          window.electronAPI.send('webview:content-extracted', {
+            url: webview.getURL(),
+            tabId: tab.id,
+            title: article.title,
+            content: article.content,
+            excerpt: article.excerpt,
+          });
+        }
+          
+        console.log('[WebPageView] ✅ Content sent to backend');
+      } catch (err) {
+        console.error('[WebPageView] ❌ Failed to inject Readability:', err);
+      }
+    });
+  
     return () => {
       unlistenNavigating();
       unlistenReload();
       unlistenGetContent();
+      unlistenExtractContent();
     };
   }, [tab.id, onUpdateTab]);
 
@@ -996,14 +1106,15 @@ function WebPageView({
       ) : (
         // 使用 <webview> tag 替代 iframe，解决 CSP/X-Frame-Options 问题
         // webSecurity=no 禁用同源策略和 CSP 检查
+        // 注意：preload 通过 session.setPreloads() 在主进程中配置
         <webview
           ref={webviewRef}
           id={`webview-${tab.id}`}
           src={normalizeUrl(tab.url)}
           className="flex-1 w-full border-0"
-          allowpopups={true}
-          plugins={true}
-          nodeintegration={false}
+          allowpopups
+          plugins
+          nodeintegration={false as any}
           partition="persist:cosurf-webview"
           webpreferences="contextIsolation=yes nodeIntegration=no webSecurity=no allowRunningInsecureContent=yes nativeWindowOpen=yes"
         />

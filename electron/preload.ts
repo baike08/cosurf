@@ -153,6 +153,15 @@ const ALLOWED_SEND_CHANNELS = [
   'window:minimize',
   'window:maximize',
   'window:close',
+  'window:is_maximized',
+  // Content Selector
+  'webview:content-selected',
+  // AI Panel
+  'ai-panel:request',
+  // Page Extractor
+  'webview:page-loaded',
+  'webview:did-finish-load',
+  'webview:content-extracted',
 ];
 
 const ALLOWED_ON_CHANNELS = [
@@ -161,6 +170,10 @@ const ALLOWED_ON_CHANNELS = [
   'ai:tool-call-start',
   'ai:tool-call-result',
   'tab:create',
+  'tab:url-updated',
+  'page:dom-loaded',
+  // AI Panel
+  'ai-panel:insert-prompt',
   'tab:navigate',
   'tab:title-updated',
   'tab:loading',
@@ -178,6 +191,7 @@ const ALLOWED_ON_CHANNELS = [
   'webview:navigating',
   'webview:reload',
   'webview:get-content',
+  'webview:extract-content',
   'cosurf:tab-url-response',
   'cosurf:new-tab-response',
   'element-selected',
