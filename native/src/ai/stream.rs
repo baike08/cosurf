@@ -293,41 +293,85 @@ pub async fn stream_chat_completion(
         // 收集工具执行结果和文件变更记录
         let mut file_changes: Vec<FileChange> = vec![];
         let mut tool_result_records: Vec<crate::ai::checkpoint::ToolResultRecord> = vec![];
+        let mut failed_tools: Vec<(ToolCall, String)> = vec![]; // 记录失败的工具
 
         for result in &tool_results {
-            if let Ok((tool_call, tool_result)) = result {
-                callbacks.emit_tool_result(conversation_id, message_id, tool_call, tool_result);
+            match result {
+                Ok((tool_call, tool_result)) => {
+                    callbacks.emit_tool_result(conversation_id, message_id, tool_call, tool_result);
 
-                // 记录工具执行结果
-                tool_result_records.push(crate::ai::checkpoint::ToolResultRecord::new(tool_call, tool_result));
+                    // 记录工具执行结果
+                    tool_result_records.push(crate::ai::checkpoint::ToolResultRecord::new(tool_call, tool_result));
 
-                // 检测文件变更（针对写入类工具）
-                if tool_call.name == "export_markdown" || tool_call.name == "run_command" {
-                    // 尝试从工具参数中提取文件路径
-                    if let Some(path) = extract_file_path_from_tool(tool_call) {
-                        // 备份文件（如果存在）
-                        match backup_file_if_needed(&path) {
-                            Ok(Some(change)) => {
-                                info!("📦 Backed up file before modification: {}", path);
-                                file_changes.push(change);
-                            }
-                            Ok(None) => {
-                                // 文件不存在，无需备份（可能是新创建的文件）
-                            }
-                            Err(e) => {
-                                warn!("⚠️  Failed to backup file {}: {}", path, e);
+                    // 检测文件变更（针对写入类工具）
+                    if tool_call.name == "export_markdown" || tool_call.name == "run_command" {
+                        // 尝试从工具参数中提取文件路径
+                        if let Some(path) = extract_file_path_from_tool(tool_call) {
+                            // 备份文件（如果存在）
+                            match backup_file_if_needed(&path) {
+                                Ok(Some(change)) => {
+                                    info!("📦 Backed up file before modification: {}", path);
+                                    file_changes.push(change);
+                                }
+                                Ok(None) => {
+                                    // 文件不存在，无需备份（可能是新创建的文件）
+                                }
+                                Err(e) => {
+                                    warn!("⚠️  Failed to backup file {}: {}", path, e);
+                                }
                             }
                         }
                     }
-                }
 
-                let tool_msg = ChatMessage {
-                    role: "tool".to_string(),
-                    content: tool_result.output.clone(),
-                    name: Some(tool_call.name.clone()),
-                    tool_call_id: Some(tool_call.id.clone()),
-                };
-                current_messages.push(tool_msg);
+                    let tool_msg = ChatMessage {
+                        role: "tool".to_string(),
+                        content: tool_result.output.clone(),
+                        name: Some(tool_call.name.clone()),
+                        tool_call_id: Some(tool_call.id.clone()),
+                    };
+                    current_messages.push(tool_msg);
+                }
+                Err(e) => {
+                    // 记录失败的工具
+                    warn!("❌ Tool execution failed: {}", e);
+                    // 这里可以尝试从错误中提取 tool_call 信息
+                }
+            }
+        }
+
+        // 检测连续失败并触发回滚
+        if !failed_tools.is_empty() && failed_tools.len() >= 3 {
+            warn!("🔄 Detected {} consecutive failures, attempting rollback...", failed_tools.len());
+            
+            if let Some(ref mgr) = checkpoint_mgr {
+                // 获取上一个检查点
+                if let Ok(Some(prev_checkpoint)) = mgr.get_latest_checkpoint(conversation_id) {
+                    warn!("🔄 Rolling back to checkpoint: {} (iteration={})", 
+                        prev_checkpoint.id, prev_checkpoint.iteration);
+                    
+                    // 回滚文件变更
+                    if !prev_checkpoint.file_changes.is_empty() {
+                        match crate::ai::checkpoint::rollback_file_changes(&prev_checkpoint.file_changes) {
+                            Ok(()) => info!("✅ Successfully rolled back file changes"),
+                            Err(e) => error!("❌ Failed to rollback file changes: {}", e),
+                        }
+                    }
+                    
+                    // 恢复消息上下文
+                    current_messages = prev_checkpoint.new_messages;
+                    
+                    // 通知用户
+                    callbacks.emit_chunk(
+                        conversation_id,
+                        message_id,
+                        "\n[系统] 检测到连续失败，已回滚到上一个稳定状态。请重试。\n",
+                        false,
+                        false,
+                    );
+                    
+                    // 跳过本次迭代，继续下一轮
+                    continue;
+                }
             }
         }
 
@@ -355,6 +399,29 @@ pub async fn stream_chat_completion(
     }
 
     info!("🏁 Agent Loop completed after {} iterations", iteration);
+    
+    // 会话结束时清理检查点（保留最近 24 小时）
+    if let Some(mut mgr) = checkpoint_mgr {
+        match mgr.cleanup_old_checkpoints(24) {
+            Ok(deleted) => {
+                if deleted > 0 {
+                    info!("🧹 Cleaned up {} old checkpoints (retention: 24h)", deleted);
+                }
+            }
+            Err(e) => warn!("⚠️  Failed to cleanup checkpoints: {}", e),
+        }
+        
+        // 清理过期备份文件（保留最近 24 小时）
+        match crate::ai::checkpoint::cleanup_old_backups(24) {
+            Ok(deleted) => {
+                if deleted > 0 {
+                    info!("🧹 Cleaned up {} old backup files (retention: 24h)", deleted);
+                }
+            }
+            Err(e) => warn!("⚠️  Failed to cleanup backup files: {}", e),
+        }
+    }
+    
     Ok(())
 }
 
