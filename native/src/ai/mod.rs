@@ -12,6 +12,7 @@ pub mod mcp_manager;
 pub mod agent;
 pub mod scheduler;      // 智能并行调度器
 pub mod context_manager; // 上下文管理器
+pub mod checkpoint;     // 检查点管理器
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
