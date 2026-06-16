@@ -449,7 +449,11 @@ async fn stream_single_turn(
 
     let body = build_stream_request(config, &messages, skills_schemas);
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(120)) // 2分钟超时
+        .build()
+        .map_err(|e| AppError::Internal(format!("Failed to create HTTP client: {}", e)))?;
+    
     let mut request = client.post(&url);
     for (key, value) in &headers {
         request = request.header(key.as_str(), value.as_str());
@@ -457,20 +461,22 @@ async fn stream_single_turn(
 
     let body_json = serde_json::to_string(&body)?;
 
-    info!("=== LLM Request: model={}, messages={} ===", config.model_id, body.messages.len());
-    if let Some(ref tools) = body.tools {
-        info!("Tools count: {}", tools.len());
-    }
+    info!("📤 Sending request to {} (model={}, messages={}, tools={})", 
+        url, config.model_id, body.messages.len(), 
+        body.tools.as_ref().map(|t| t.len()).unwrap_or(0));
 
     let mut event_source = request
         .body(body_json)
         .eventsource()
         .map_err(|e| AppError::AiProvider(format!("Failed to create event source: {}", e)))?;
 
+    info!("✅ SSE connection established, waiting for response...");
+
     let mut full_response = String::new();
     let mut full_thinking = String::new();
     let mut thinking_started = false;
     let mut sse_chunk_count = 0;
+    let mut last_event_time = std::time::Instant::now();
     let mut accumulating_tool_calls: std::collections::HashMap<usize, serde_json::Map<String, serde_json::Value>> = std::collections::HashMap::new();
 
     while let Some(event) = event_source.next().await {
@@ -481,13 +487,23 @@ async fn stream_single_turn(
             reset_cancel();
             break;
         }
+        
+        // 检查超时（30秒无响应）
+        let elapsed = last_event_time.elapsed();
+        if elapsed > std::time::Duration::from_secs(30) {
+            error!("⏰ SSE timeout: no events for {:?}", elapsed);
+            callbacks.emit_chunk(conversation_id, message_id, "", false, true);
+            return Err(AppError::AiProvider("Response timeout (30s)".to_string()));
+        }
 
         match event {
             Ok(Event::Open) => {
                 info!("SSE connection opened");
+                last_event_time = std::time::Instant::now();
             }
             Ok(Event::Message(msg)) => {
                 sse_chunk_count += 1;
+                last_event_time = std::time::Instant::now(); // 更新最后事件时间
                 if msg.data == "[DONE]" {
                     let final_tool_calls: Vec<serde_json::Value> = accumulating_tool_calls
                         .values()
