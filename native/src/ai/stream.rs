@@ -15,6 +15,7 @@ use crate::ai::provider::{
 };
 use crate::ai::tools::{normalize_tool_call_format, ToolCall, ToolResult, execute_builtin_tool};
 use crate::ai::{is_cancelled, reset_cancel};
+use crate::ai::checkpoint::{CheckpointManager, FileChange, backup_file_if_needed};
 use crate::error::{AppError, AppResult};
 
 /// 流式回调接口（通过 ThreadsafeFunction 从 Rust 线程安全地调用 Node.js）
@@ -132,6 +133,16 @@ pub async fn stream_chat_completion(
 ) -> AppResult<()> {
     info!("🤖 Starting Agent Loop for conversation {}", conversation_id);
 
+    // 初始化 CheckpointManager（使用 SQLite 存储）
+    let checkpoint_db_path = format!("checkpoint_{}.db", conversation_id);
+    let mut checkpoint_mgr = match CheckpointManager::new(&checkpoint_db_path) {
+        Ok(mgr) => Some(mgr),
+        Err(e) => {
+            warn!("⚠️  Failed to initialize CheckpointManager: {}, continuing without checkpoints", e);
+            None
+        }
+    };
+
     let mut current_messages = messages;
     let mut iteration = 0;
     let max_iterations = 30;
@@ -143,6 +154,23 @@ pub async fn stream_chat_completion(
     loop {
         iteration += 1;
         info!("🔄 Agent Loop iteration {}/{}", iteration, max_iterations);
+
+        // 在迭代前创建检查点（仅当 CheckpointManager 可用时）
+        if let Some(ref mut mgr) = checkpoint_mgr {
+            // 只在第 3 次迭代后开始创建检查点，避免过多开销
+            if iteration >= 3 {
+                match mgr.create_checkpoint(
+                    conversation_id,
+                    iteration - 1, // 保存上一次迭代的状态
+                    vec![], // new_messages 为空，增量记录
+                    vec![], // file_changes 将在工具执行后填充
+                    vec![], // tool_results 将在工具执行后填充
+                ) {
+                    Ok(cp_id) => info!("📸 Created checkpoint: {} (iteration={})", cp_id, iteration - 1),
+                    Err(e) => warn!("⚠️  Failed to create checkpoint: {}", e),
+                }
+            }
+        }
 
         let tool_calls_result = stream_single_turn(
             config,
@@ -262,9 +290,36 @@ pub async fn stream_chat_completion(
         let tool_results: Vec<std::result::Result<(ToolCall, ToolResult), AppError>> =
             futures::future::join_all(futures).await;
 
+        // 收集工具执行结果和文件变更记录
+        let mut file_changes: Vec<FileChange> = vec![];
+        let mut tool_result_records: Vec<crate::ai::checkpoint::ToolResultRecord> = vec![];
+
         for result in &tool_results {
             if let Ok((tool_call, tool_result)) = result {
                 callbacks.emit_tool_result(conversation_id, message_id, tool_call, tool_result);
+
+                // 记录工具执行结果
+                tool_result_records.push(crate::ai::checkpoint::ToolResultRecord::new(tool_call, tool_result));
+
+                // 检测文件变更（针对写入类工具）
+                if tool_call.name == "export_markdown" || tool_call.name == "run_command" {
+                    // 尝试从工具参数中提取文件路径
+                    if let Some(path) = extract_file_path_from_tool(tool_call) {
+                        // 备份文件（如果存在）
+                        match backup_file_if_needed(&path) {
+                            Ok(Some(change)) => {
+                                info!("📦 Backed up file before modification: {}", path);
+                                file_changes.push(change);
+                            }
+                            Ok(None) => {
+                                // 文件不存在，无需备份（可能是新创建的文件）
+                            }
+                            Err(e) => {
+                                warn!("⚠️  Failed to backup file {}: {}", path, e);
+                            }
+                        }
+                    }
+                }
 
                 let tool_msg = ChatMessage {
                     role: "tool".to_string(),
@@ -273,6 +328,22 @@ pub async fn stream_chat_completion(
                     tool_call_id: Some(tool_call.id.clone()),
                 };
                 current_messages.push(tool_msg);
+            }
+        }
+
+        // 更新检查点（添加文件变更和工具结果）
+        if let Some(ref mut mgr) = checkpoint_mgr {
+            if !file_changes.is_empty() || !tool_result_records.is_empty() {
+                match mgr.create_checkpoint(
+                    conversation_id,
+                    iteration,
+                    vec![], // new_messages
+                    file_changes,
+                    tool_result_records,
+                ) {
+                    Ok(cp_id) => info!("📸 Updated checkpoint with file changes: {} (iteration={})", cp_id, iteration),
+                    Err(e) => warn!("⚠️  Failed to update checkpoint: {}", e),
+                }
             }
         }
 
@@ -819,4 +890,28 @@ pub async fn stream_chat_completion_optimized(
     
     info!("🏁 Optimized Agent Loop completed after {} iterations", iteration);
     Ok(())
+}
+
+// ============================================================
+// 辅助函数：从工具参数中提取文件路径
+// ============================================================
+
+/// 从工具调用中提取文件路径（如果存在）
+fn extract_file_path_from_tool(tool_call: &ToolCall) -> Option<String> {
+    // 尝试从 arguments 中提取 path 或 file_path 字段
+    let args = &tool_call.arguments;
+    
+    if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+        return Some(path.to_string());
+    }
+    
+    if let Some(file_path) = args.get("file_path").and_then(|v| v.as_str()) {
+        return Some(file_path.to_string());
+    }
+    
+    if let Some(filename) = args.get("filename").and_then(|v| v.as_str()) {
+        return Some(filename.to_string());
+    }
+    
+    None
 }
