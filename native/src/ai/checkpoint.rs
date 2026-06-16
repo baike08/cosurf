@@ -7,7 +7,7 @@
 
 use rusqlite::{Connection, params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::ai::provider::ChatMessage;
@@ -25,8 +25,51 @@ pub struct Checkpoint {
     /// 新增的消息（增量）
     pub new_messages: Vec<ChatMessage>,
     
+    /// 文件变更记录
+    pub file_changes: Vec<FileChange>,
+    
     /// 工具执行结果记录
     pub tool_results: Vec<ToolResultRecord>,
+}
+
+/// 文件变更记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FileChange {
+    /// 创建了新文件
+    Created { 
+        path: String,
+        backup_path: Option<String>, // 通常为空
+    },
+    /// 修改了现有文件
+    Modified { 
+        path: String,
+        backup_path: String, // 备份文件路径
+    },
+    /// 删除了文件
+    Deleted { 
+        path: String,
+        backup_path: String, // 备份文件路径
+    },
+}
+
+impl FileChange {
+    /// 获取原始文件路径
+    pub fn get_path(&self) -> &str {
+        match self {
+            Self::Created { path, .. } => path,
+            Self::Modified { path, .. } => path,
+            Self::Deleted { path, .. } => path,
+        }
+    }
+    
+    /// 获取备份文件路径（如果有）
+    pub fn get_backup_path(&self) -> Option<&str> {
+        match self {
+            Self::Created { backup_path, .. } => backup_path.as_deref(),
+            Self::Modified { backup_path, .. } => Some(backup_path),
+            Self::Deleted { backup_path, .. } => Some(backup_path),
+        }
+    }
 }
 
 /// 工具执行结果记录（简化版，用于持久化）
@@ -98,6 +141,7 @@ impl CheckpointManager {
         conversation_id: &str,
         iteration: u32,
         new_messages: Vec<ChatMessage>,
+        file_changes: Vec<FileChange>,
         tool_results: Vec<ToolResultRecord>,
     ) -> AppResult<String> {
         let checkpoint_id = Uuid::new_v4().to_string();
@@ -109,6 +153,7 @@ impl CheckpointManager {
             iteration,
             timestamp,
             new_messages,
+            file_changes,
             tool_results,
         };
         
@@ -255,6 +300,145 @@ impl CheckpointManager {
     }
 }
 
+// ============================================================
+// 文件备份与回滚工具函数
+// ============================================================
+
+/// 备份文件（如果需要）
+/// 
+/// 如果文件存在，创建备份；如果不存在，返回 None
+pub fn backup_file_if_needed(file_path: &str) -> AppResult<Option<FileChange>> {
+    let path = std::path::Path::new(file_path);
+    
+    if !path.exists() {
+        // 文件不存在，不需要备份
+        return Ok(None);
+    }
+    
+    // 创建备份文件
+    let backup_dir = std::env::temp_dir().join("cosurf-checkpoint-backups");
+    std::fs::create_dir_all(&backup_dir)
+        .map_err(|e| AppError::Internal(format!("Failed to create backup dir: {}", e)))?;
+    
+    let backup_filename = format!("{}_{}.bak", 
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    let backup_path = backup_dir.join(backup_filename);
+    
+    // 复制文件到备份目录
+    std::fs::copy(path, &backup_path)
+        .map_err(|e| AppError::Internal(format!("Failed to backup file: {}", e)))?;
+    
+    info!("📦 Backed up file: {} -> {}", file_path, backup_path.display());
+    
+    Ok(Some(FileChange::Modified {
+        path: file_path.to_string(),
+        backup_path: backup_path.to_string_lossy().to_string(),
+    }))
+}
+
+/// 从备份恢复文件
+pub fn restore_from_backup(file_change: &FileChange) -> AppResult<()> {
+    match file_change {
+        FileChange::Created { path, .. } => {
+            // 删除创建的文件
+            if std::path::Path::new(path).exists() {
+                std::fs::remove_file(path)
+                    .map_err(|e| AppError::Internal(format!("Failed to delete created file: {}", e)))?;
+                info!("🗑️  Deleted created file: {}", path);
+            }
+        }
+        FileChange::Modified { path, backup_path } => {
+            // 从备份恢复
+            if std::path::Path::new(backup_path).exists() {
+                std::fs::copy(backup_path, path)
+                    .map_err(|e| AppError::Internal(format!("Failed to restore file: {}", e)))?;
+                
+                // 清理备份文件
+                let _ = std::fs::remove_file(backup_path);
+                
+                info!("🔄 Restored file from backup: {}", path);
+            } else {
+                warn!("⚠️  Backup file not found: {}", backup_path);
+            }
+        }
+        FileChange::Deleted { path, backup_path } => {
+            // 从备份恢复删除的文件
+            if std::path::Path::new(backup_path).exists() {
+                std::fs::copy(backup_path, path)
+                    .map_err(|e| AppError::Internal(format!("Failed to restore deleted file: {}", e)))?;
+                
+                // 清理备份文件
+                let _ = std::fs::remove_file(backup_path);
+                
+                info!("🔄 Restored deleted file: {}", path);
+            } else {
+                warn!("⚠️  Backup file not found: {}", backup_path);
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// 批量回滚文件变更
+pub fn rollback_file_changes(file_changes: &[FileChange]) -> AppResult<()> {
+    for change in file_changes {
+        if let Err(e) = restore_from_backup(change) {
+            error!("❌ Failed to rollback file change: {:?}, error: {}", change, e);
+            // 继续回滚其他文件，不中断
+        }
+    }
+    
+    Ok(())
+}
+
+/// 清理过期备份文件（保留最近 N 小时）
+pub fn cleanup_old_backups(retention_hours: i64) -> AppResult<usize> {
+    let backup_dir = std::env::temp_dir().join("cosurf-checkpoint-backups");
+    
+    if !backup_dir.exists() {
+        return Ok(0);
+    }
+    
+    let cutoff_time = chrono::Utc::now().timestamp_millis() - (retention_hours * 3600 * 1000);
+    let mut deleted_count = 0;
+    
+    for entry in std::fs::read_dir(&backup_dir)
+        .map_err(|e| AppError::Internal(format!("Failed to read backup dir: {}", e)))?
+    {
+        let entry = entry
+            .map_err(|e| AppError::Internal(format!("Failed to read dir entry: {}", e)))?;
+        
+        let path = entry.path();
+        
+        // 只处理 .bak 文件
+        if path.extension().and_then(|e| e.to_str()) == Some("bak") {
+            // 检查文件修改时间
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+                        let file_timestamp = duration.as_millis() as i64;
+                        
+                        if file_timestamp < cutoff_time {
+                            if std::fs::remove_file(&path).is_ok() {
+                                deleted_count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    if deleted_count > 0 {
+        info!("🧹 Cleaned up {} old backup files", deleted_count);
+    }
+    
+    Ok(deleted_count)
+}
+
 /// 检查点摘要（轻量级，用于列表展示）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckpointSummary {
@@ -304,6 +488,7 @@ mod tests {
             "test-conversation",
             1,
             messages.clone(),
+            vec![], // file_changes
             tool_results.clone(),
         ).unwrap();
         
@@ -328,6 +513,7 @@ mod tests {
                 "test-conversation",
                 i,
                 vec![],
+                vec![], // file_changes
                 vec![],
             ).unwrap();
             
@@ -351,6 +537,7 @@ mod tests {
             "test-conversation",
             5,
             vec![],
+            vec![], // file_changes
             vec![],
         ).unwrap();
         
@@ -368,7 +555,7 @@ mod tests {
         let (mut mgr, db_path) = setup_test_db();
         
         // 创建检查点
-        mgr.create_checkpoint("test", 1, vec![], vec![]).unwrap();
+        mgr.create_checkpoint("test", 1, vec![], vec![], vec![]).unwrap();
         
         // 等待确保时间戳已设置
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -391,7 +578,7 @@ mod tests {
         
         // 创建多个检查点
         for i in 1..=3 {
-            mgr.create_checkpoint("test", i, vec![], vec![]).unwrap();
+            mgr.create_checkpoint("test", i, vec![], vec![], vec![]).unwrap();
         }
         
         // 列出所有检查点
@@ -403,5 +590,124 @@ mod tests {
         assert_eq!(summaries[2].iteration, 3);
         
         cleanup_test_db(&db_path);
+    }
+    
+    #[test]
+    fn test_backup_and_restore_file() {
+        use std::io::Write;
+        
+        // 创建测试文件
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join(format!("test_file_{}.txt", Uuid::new_v4()));
+        let test_content = "Hello, Checkpoint!";
+        
+        // 写入测试内容
+        let mut file = fs::File::create(&test_file).unwrap();
+        file.write_all(test_content.as_bytes()).unwrap();
+        drop(file);
+        
+        // 备份文件
+        let file_path = test_file.to_string_lossy().to_string();
+        let change_opt = backup_file_if_needed(&file_path).unwrap();
+        
+        assert!(change_opt.is_some());
+        let change = change_opt.unwrap();
+        
+        match &change {
+            FileChange::Modified { path, backup_path } => {
+                assert_eq!(path, &file_path);
+                assert!(std::path::Path::new(backup_path).exists());
+            }
+            _ => panic!("Expected Modified variant"),
+        }
+        
+        // 修改文件内容
+        let mut file = fs::File::create(&test_file).unwrap();
+        file.write_all(b"Modified content").unwrap();
+        drop(file);
+        
+        // 从备份恢复
+        restore_from_backup(&change).unwrap();
+        
+        // 验证恢复成功
+        let restored_content = fs::read_to_string(&test_file).unwrap();
+        assert_eq!(restored_content, test_content);
+        
+        // 清理
+        let _ = fs::remove_file(&test_file);
+    }
+    
+    #[test]
+    fn test_file_creation_rollback() {
+        use std::io::Write;
+        
+        // 模拟创建文件的回滚
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join(format!("test_new_file_{}.txt", Uuid::new_v4()));
+        let file_path = test_file.to_string_lossy().to_string();
+        
+        // 创建文件
+        let mut file = fs::File::create(&test_file).unwrap();
+        file.write_all(b"New file content").unwrap();
+        drop(file);
+        
+        assert!(test_file.exists());
+        
+        // 回滚（删除创建的文件）
+        let change = FileChange::Created {
+            path: file_path.clone(),
+            backup_path: None,
+        };
+        restore_from_backup(&change).unwrap();
+        
+        // 验证文件已删除
+        assert!(!test_file.exists());
+    }
+    
+    #[test]
+    fn test_batch_file_rollback() {
+        use std::io::Write;
+        
+        let temp_dir = std::env::temp_dir();
+        
+        // 创建多个测试文件
+        let mut changes = vec![];
+        let mut files = vec![];
+        
+        for i in 0..3 {
+            let test_file = temp_dir.join(format!("test_batch_{}_{}.txt", i, Uuid::new_v4()));
+            let file_path = test_file.to_string_lossy().to_string();
+            
+            // 创建并备份
+            let mut file = fs::File::create(&test_file).unwrap();
+            file.write_all(format!("Content {}", i).as_bytes()).unwrap();
+            drop(file);
+            
+            if let Some(change) = backup_file_if_needed(&file_path).unwrap() {
+                changes.push(change);
+                files.push(test_file);
+            }
+        }
+        
+        // 修改所有文件
+        for file in &files {
+            let mut f = fs::File::create(file).unwrap();
+            f.write_all(b"Modified").unwrap();
+            drop(f);
+        }
+        
+        // 批量回滚
+        rollback_file_changes(&changes).unwrap();
+        
+        // 验证所有文件已恢复
+        for (i, file) in files.iter().enumerate() {
+            let content = fs::read_to_string(file).unwrap();
+            assert_eq!(content, format!("Content {}", i));
+        }
+        
+        // 清理
+        for file in &files {
+            let _ = fs::remove_file(file);
+        }
     }
 }
