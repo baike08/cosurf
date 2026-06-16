@@ -5,8 +5,10 @@
  * 桥接前端 React 应用和 Rust Native 模块。
  */
 
-import { ipcMain, BrowserWindow, dialog, shell } from 'electron';
+import { ipcMain, BrowserWindow, dialog, shell, app } from 'electron';
 import { TabManager } from './window-manager';
+import * as path from 'path';
+import * as fs from 'fs';
 
 // Native 模块类型（延迟加载）
 let native: any = null;
@@ -671,18 +673,57 @@ async function executeElectronBridgeTool(
     }
 
     case 'summarize_page': {
-      // 总结当前页面
+      // 总结当前页面并保存为文件
       const currentTabId = await getActiveTabId();
       if (!currentTabId) {
         return { success: false, error: 'No active tab' };
       }
 
       try {
+        // 获取页面内容
         const content = await tabManager.executeJavaScript(currentTabId, `
-          document.body.innerText.substring(0, 15000)
+          (function() {
+            const title = document.title || 'Untitled';
+            const bodyText = document.body.innerText.substring(0, 50000);
+            return JSON.stringify({ title, content: bodyText });
+          })()
         `);
-        return { success: true, content, length: content.length };
+        
+        const pageInfo = JSON.parse(content);
+        const { title, content: pageContent } = pageInfo;
+        
+        // 生成文件名和路径
+        const timestamp = Date.now();
+        const safeTitle = title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_').substring(0, 50);
+        const fileName = `${safeTitle}_${timestamp}.md`;
+        const dataDir = path.join(app.getPath('userData'), 'cosurf-data', 'extracted');
+        
+        // 确保目录存在
+        if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+        }
+        
+        const filePath = path.join(dataDir, fileName);
+        
+        // 创建 Markdown 内容
+        const tabInfo = tabManager.getTabInfo(currentTabId);
+        const url = tabInfo?.url || 'unknown';
+        const markdown = `# ${title}\n\n**URL:** ${url}\n\n**Extracted at:** ${new Date().toISOString()}\n\n---\n\n${pageContent}`;
+        
+        // 保存文件
+        fs.writeFileSync(filePath, markdown, 'utf-8');
+        
+        console.log(`[IPC] summarize_page: Saved to ${filePath}`);
+        
+        return { 
+          success: true, 
+          file_path: filePath,
+          file_name: fileName,
+          title,
+          length: markdown.length 
+        };
       } catch (err) {
+        console.error('[IPC] summarize_page failed:', err);
         return { success: false, error: String(err) };
       }
     }
