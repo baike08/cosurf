@@ -247,7 +247,12 @@ impl McpClient {
 
     /// HTTP 模式调用工具
     async fn call_tool_http(&self, tool_name: &str, arguments: &serde_json::Value) -> AppResult<serde_json::Value> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60)) // MCP 工具调用超时 60 秒
+            .build()
+            .map_err(|e| AppError::Internal(format!("Failed to create MCP HTTP client: {}", e)))?;
+
+        info!(tool = %tool_name, "📤 Sending MCP tool call request...");
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -273,6 +278,8 @@ impl McpClient {
 
         let response = req.json(&request).send().await
             .map_err(|e| AppError::AiProvider(format!("MCP tool call failed: {}", e)))?;
+
+        info!(tool = %tool_name, status = %response.status(), "📥 Received MCP response");
 
         let result: serde_json::Value = response.json().await
             .map_err(|e| AppError::AiProvider(format!("Failed to parse tool call response: {}", e)))?;
