@@ -15,6 +15,7 @@ import path from 'path';
 import { TabManager } from './window-manager';
 import { registerIpcHandlers } from './ipc-handlers';
 import { initEventTracker } from './modules/event-tracker';
+import { initPageExtractor } from './modules/page-extractor';
 import { setupNetworkInterception } from './network-interceptor';
 
 // ===== 全局变量 =====
@@ -101,6 +102,10 @@ function initNativeModule(): void {
     // 调用 native_init (Rust #[napi] pub fn native_init -> JS: nativeInit)
     const appDataDir = getAppDataDir();
     
+    // 设置环境变量，让 Rust 代码知道数据目录位置
+    process.env.COSURF_APP_DATA_DIR = appDataDir;
+    console.log('[CoSurf] Setting COSURF_APP_DATA_DIR:', appDataDir);
+    
     // 不传递 skills_dir 参数，让 native 模块自动从数据库读取配置
     if (typeof nativeModule.nativeInit === 'function') {
       nativeModule.nativeInit(appDataDir, null); // 第二个参数为 null，让 Rust 自动从数据库读取
@@ -119,8 +124,15 @@ function configureWebviewSession(): void {
   
   // 设置 preload 脚本
   const preloadPath = path.join(__dirname, '../preload/content-preload.js');
-  webviewSession.setPreloads([preloadPath]);
-  console.log('[CoSurf] Webview preload configured:', preloadPath);
+  console.log('[CoSurf] Webview preload path:', preloadPath);
+  console.log('[CoSurf] Preload file exists:', require('fs').existsSync(preloadPath));
+  
+  try {
+    webviewSession.setPreloads([preloadPath]);
+    console.log('[CoSurf] ✅ Webview preload configured successfully');
+  } catch (err) {
+    console.error('[CoSurf] ❌ Failed to set preload:', err);
+  }
   
   webviewSession.webRequest.onHeadersReceived(
     { urls: ['*://*/*'] },
@@ -202,10 +214,13 @@ app.whenReady().then(async () => {
   // 6. 初始化事件追踪器
   initEventTracker(tabManager, mainWindow);
 
-  // 7. 注册全局快捷键
+  // 7. 初始化网页内容提取器
+  initPageExtractor(mainWindow);
+
+  // 8. 注册全局快捷键
   registerGlobalShortcuts();
 
-  // 8. 创建一个默认标签页
+  // 9. 创建一个默认标签页
   tabManager.createTab('tab-initial', 'about:blank', '新标签页');
 
   console.log('[CoSurf] === Application Started ===');
