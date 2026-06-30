@@ -56,20 +56,46 @@ impl CodexAgent {
         // 优先使用配置的路径
         if let Ok(path) = std::env::var("CODEX_BINARY_PATH") {
             if std::path::Path::new(&path).exists() {
+                info!("📍 Using CODEX_BINARY_PATH: {}", path);
                 return Ok(path);
             }
         }
         
-        // 尝试在 PATH 中查找
+        // 检查是否启用 mock 模式
+        if std::env::var("CODEX_USE_MOCK").unwrap_or_default() == "true" {
+            // Mock CLI 路径（相对于 native/src/ai/）
+            let mock_path = std::env::current_dir()
+                .ok()
+                .and_then(|dir| dir.parent().map(|p| p.to_path_buf()))
+                .map(|mut p| {
+                    p.push("native");
+                    p.push("src");
+                    p.push("ai");
+                    p.push("mock_codex_cli.js");
+                    p
+                })
+                .filter(|p| p.exists());
+            
+            if let Some(path) = mock_path {
+                info!("🎭 Using mock Codex CLI: {:?}", path);
+                return Ok(path.display().to_string());
+            }
+        }
+        
+        // 尝试在 PATH 中查找真实的 codex
         #[cfg(target_os = "windows")]
         let binary_name = "codex.exe";
         #[cfg(not(target_os = "windows"))]
         let binary_name = "codex";
         
         // TODO: 实现 PATH 搜索逻辑
-        // 暂时返回错误，提示用户配置 CODEX_BINARY_PATH
         Err(AppError::Internal(
-            "Codex CLI not found. Please set CODEX_BINARY_PATH environment variable.".into()
+            format!(
+                "Codex CLI not found. Options:\n\
+                 1. Set CODEX_BINARY_PATH to the codex binary location\n\
+                 2. Set CODEX_USE_MOCK=true to use mock CLI for testing\n\
+                 3. Install codex CLI and add to PATH"
+            )
         ))
     }
     
@@ -77,8 +103,21 @@ impl CodexAgent {
     pub async fn start_thread(&self) -> AppResult<CodexThreadHandle> {
         info!("🧵 Starting new Codex thread via CLI");
         
+        // 判断是否是 mock CLI（.js 文件）
+        let is_mock = self.codex_path.ends_with(".js");
+        
         // 启动 codex CLI 进程
-        let child = tokio::process::Command::new(&self.codex_path)
+        let mut cmd = if is_mock {
+            // Mock CLI 需要用 node 运行
+            let mut c = tokio::process::Command::new("node");
+            c.arg(&self.codex_path);
+            c
+        } else {
+            // 真实的 codex 二进制文件
+            tokio::process::Command::new(&self.codex_path)
+        };
+        
+        let child = cmd
             .arg("chat")
             .arg("--json")  // JSON 模式
             .stdin(Stdio::piped())
