@@ -1,10 +1,10 @@
 //! 会话（Conversations）模块
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conversation {

@@ -3,7 +3,14 @@
 //! 从 src-tauri/src/db/ 迁移，移除 Tauri 依赖，通过 napi-rs 导出。
 //! 包含: conversations, messages, bookmarks, bookmark_folders, history, settings, model_configs, mcp_servers, user_events
 
-// 模块化数据库实体（渐进式重构）
+// 模块化数据库实体（按 entity 拆分）
+pub mod bookmarks;
+pub mod conversations;
+pub mod history;
+pub mod mcp_servers;
+pub mod messages;
+pub mod model_configs;
+pub mod settings;
 pub mod user_events;
 
 use napi::bindgen_prelude::*;
@@ -61,109 +68,14 @@ impl Database {
     }
 
     fn run_migrations(&self) -> AppResult<()> {
-        self.conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS conversations (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL DEFAULT 'New Conversation',
-                is_pinned INTEGER NOT NULL DEFAULT 0,
-                model_id TEXT NOT NULL DEFAULT '',
-                message_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                conversation_id TEXT NOT NULL,
-                role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
-                content TEXT NOT NULL DEFAULT '',
-                thinking_content TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'streaming', 'complete', 'error')),
-                attachments TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
-
-            CREATE TABLE IF NOT EXISTS bookmarks (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                url TEXT NOT NULL,
-                favicon TEXT,
-                folder_id TEXT,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS bookmark_folders (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                parent_id TEXT,
-                sort_order INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS history (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL DEFAULT '',
-                url TEXT NOT NULL,
-                visited_at TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_history_visited_at ON history(visited_at DESC);
-
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS model_configs (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                api_key TEXT,
-                base_url TEXT,
-                temperature REAL NOT NULL DEFAULT 0.7,
-                top_p REAL NOT NULL DEFAULT 1.0,
-                max_tokens INTEGER NOT NULL DEFAULT 4096,
-                is_local INTEGER NOT NULL DEFAULT 0,
-                is_active INTEGER NOT NULL DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS mcp_servers (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                server_type TEXT NOT NULL DEFAULT 'stdio',
-                url TEXT,
-                command TEXT,
-                args TEXT,
-                cwd TEXT,
-                env TEXT,
-                disabled INTEGER NOT NULL DEFAULT 0,
-                timeout INTEGER,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                headers TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);
-
-            -- Agent Prompts 表：存储可配置的 System Prompt
-            CREATE TABLE IF NOT EXISTS agent_prompts (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,  -- prompt 名称（唯一标识）
-                content TEXT NOT NULL,      -- prompt 内容
-                description TEXT,           -- 描述说明
-                is_enabled INTEGER NOT NULL DEFAULT 1,  -- 是否启用
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            ",
-        )?;
+        // 委托给各个模块创建表
+        conversations::create_conversations_table(self.conn())?;
+        messages::create_messages_table(self.conn())?;
+        bookmarks::create_bookmarks_table(self.conn())?;
+        history::create_history_table(self.conn())?;
+        settings::create_settings_table(self.conn())?;
+        model_configs::create_model_configs_table(self.conn())?;
+        mcp_servers::create_mcp_servers_table(self.conn())?;
 
         // 确保 thinking_content 列存在
         self.ensure_column("messages", "thinking_content", "TEXT NOT NULL DEFAULT ''")?;
@@ -171,6 +83,11 @@ impl Database {
 
         // 初始化默认 Agent Prompts
         self.init_default_agent_prompts()?;
+
+        // 创建用户行为事件表
+        tracing::info!("🔧 Creating user_events table in migrations...");
+        user_events::create_user_events_table(self.conn())?;
+        tracing::info!("✅ user_events table migration completed");
 
         Ok(())
     }
@@ -240,19 +157,7 @@ impl Database {
             )?;
         }
 
-        // 创建用户行为事件表
-        tracing::info!("🔧 Creating user_events table in migrations...");
-        self.create_user_events_table()?;
-        tracing::info!("✅ user_events table migration completed");
-
         Ok(())
-    }
-}
-
-// 在 Database::run_migrations 中调用（需要在 run_migrations 末尾添加）
-impl Database {
-    pub fn create_user_events_table(&self) -> AppResult<()> {
-        user_events::create_user_events_table(self.conn())
     }
 }
 
@@ -1652,13 +1557,28 @@ pub fn db_load_mcp_servers(servers_json: String) -> Result<()> {
 /// 插入用户行为事件
 #[napi]
 pub fn db_insert_user_event(event_json: String) -> Result<()> {
-    let event: user_events::UserEvent = serde_json::from_str(&event_json)
+    let mut event: user_events::UserEvent = serde_json::from_str(&event_json)
         .map_err(|e| Error::from_reason(format!("Failed to parse event: {}", e)))?;
+    
+    // 生成事件指纹（用于去重）
+    let fingerprint = user_events::generate_event_fingerprint(&event.url, &event.data);
+    event.fingerprint = Some(fingerprint.clone());
+    
+    // 检查是否存在重复事件（5分钟内的相同指纹）
+    let is_duplicate = with_db(|db| {
+        user_events::is_duplicate_event(db.conn(), &fingerprint, 5 * 60 * 1000) // 5分钟
+    })?;
+    
+    if is_duplicate {
+        tracing::info!("🚫 Duplicate event detected, skipping: fingerprint={}", fingerprint);
+        return Ok(()); // 静默跳过重复事件
+    }
     
     with_db(|db| {
         user_events::insert_user_event(db.conn(), &event)
     })?;
     
+    tracing::info!("✅ Event inserted with fingerprint: {}", fingerprint);
     Ok(())
 }
 

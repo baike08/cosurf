@@ -33,6 +33,10 @@ pub enum EventType {
     WindowResize,
     /// 页面加载
     PageLoad,
+    /// 内容选择（文本/区域）
+    ContentSelect,
+    /// 网页内容提取
+    PageExtract,
 }
 
 impl std::fmt::Display for EventType {
@@ -48,6 +52,8 @@ impl std::fmt::Display for EventType {
             EventType::FormInput => write!(f, "form_input"),
             EventType::WindowResize => write!(f, "window_resize"),
             EventType::PageLoad => write!(f, "page_load"),
+            EventType::ContentSelect => write!(f, "content_select"),
+            EventType::PageExtract => write!(f, "page_extract"),
         }
     }
 }
@@ -67,6 +73,8 @@ impl std::str::FromStr for EventType {
             "form_input" => Ok(EventType::FormInput),
             "window_resize" => Ok(EventType::WindowResize),
             "page_load" => Ok(EventType::PageLoad),
+            "content_select" => Ok(EventType::ContentSelect),
+            "page_extract" => Ok(EventType::PageExtract),
             _ => Err(format!("Unknown event type: {}", s)),
         }
     }
@@ -131,6 +139,32 @@ pub struct EventData {
     
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load_time: Option<i64>,
+    
+    // 内容选择相关字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_text: Option<String>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_length: Option<i64>,
+    
+    // 区域框选相关字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_type: Option<String>, // "text" | "area"
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area_x: Option<f64>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area_y: Option<f64>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area_width: Option<f64>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub area_height: Option<f64>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub highlight_color: Option<String>, // 高亮颜色
 }
 
 /// 用户行为事件
@@ -147,6 +181,8 @@ pub struct UserEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_id: Option<i64>,
     pub data: EventData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>, // 事件指纹（用于去重）
     pub created_at: i64,
 }
 
@@ -154,6 +190,7 @@ pub struct UserEvent {
 pub fn create_user_events_table(conn: &Connection) -> AppResult<()> {
     tracing::info!("📊 Creating user_events table...");
     
+    // 创建表（如果不存在）
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS user_events (
@@ -174,6 +211,28 @@ pub fn create_user_events_table(conn: &Connection) -> AppResult<()> {
         "#
     )?;
     
+    // 迁移：添加 fingerprint 字段（如果不存在）
+    match conn.execute("ALTER TABLE user_events ADD COLUMN fingerprint TEXT", []) {
+        Ok(_) => tracing::info!("✅ Added fingerprint column to user_events table"),
+        Err(rusqlite::Error::SqliteFailure(err, _)) => {
+            if err.extended_code == 1 { // SQLITE_ERROR (duplicate column)
+                tracing::info!("ℹ️  fingerprint column already exists");
+            } else {
+                tracing::warn!("⚠️  Failed to add fingerprint column: {}", err);
+            }
+        }
+        Err(e) => {
+            tracing::warn!("⚠️  Failed to add fingerprint column: {}", e);
+        }
+    }
+    
+    // 创建 fingerprint 索引（如果不存在）
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_user_events_fingerprint ON user_events(fingerprint);
+        "#
+    )?;
+    
     tracing::info!("✅ user_events table created successfully");
     
     Ok(())
@@ -186,8 +245,8 @@ pub fn insert_user_event(conn: &Connection, event: &UserEvent) -> AppResult<()> 
     
     conn.execute(
         r#"
-        INSERT INTO user_events (id, type, timestamp, url, tab_id, window_id, data, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO user_events (id, type, timestamp, url, tab_id, window_id, data, fingerprint, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
         params![
             event.id,
@@ -197,7 +256,8 @@ pub fn insert_user_event(conn: &Connection, event: &UserEvent) -> AppResult<()> 
             event.tab_id,
             event.window_id,
             data_json,
-            event.created_at
+            event.fingerprint,
+            event.created_at,
         ],
     )?;
     
@@ -244,7 +304,7 @@ pub fn get_user_events(
 ) -> AppResult<Vec<UserEvent>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, type, timestamp, url, tab_id, window_id, data, created_at
+        SELECT id, type, timestamp, url, tab_id, window_id, data, fingerprint, created_at
         FROM user_events
         WHERE timestamp >= ? AND timestamp <= ?
         ORDER BY timestamp DESC
@@ -276,7 +336,8 @@ pub fn get_user_events(
                 tab_id: row.get(4)?,
                 window_id: row.get(5)?,
                 data,
-                created_at: row.get(7)?,
+                fingerprint: row.get(7)?,
+                created_at: row.get(8)?,
             })
         }
     )?;
@@ -419,6 +480,7 @@ pub fn create_event(
         tab_id,
         window_id,
         data,
+        fingerprint: None, // 在 insert_user_event 中生成
         created_at: now,
     }
 }
@@ -447,4 +509,55 @@ pub struct ActiveTab {
     pub url: String,
     pub event_count: i64,
     pub last_activity: i64,
+}
+
+/// 生成事件指纹（用于去重）
+/// 
+/// 基于 URL + data 内容生成唯一标识
+pub fn generate_event_fingerprint(url: &Option<String>, data: &EventData) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    let mut hasher = DefaultHasher::new();
+    
+    // 哈希 URL
+    if let Some(u) = url {
+        u.hash(&mut hasher);
+    }
+    
+    // 哈希 selected_text（文本选择）
+    if let Some(text) = &data.selected_text {
+        text.hash(&mut hasher);
+    }
+    
+    // 哈希区域坐标（区域框选）
+    if let (Some(x), Some(y), Some(w), Some(h)) = (data.area_x, data.area_y, data.area_width, data.area_height) {
+        x.to_bits().hash(&mut hasher);
+        y.to_bits().hash(&mut hasher);
+        w.to_bits().hash(&mut hasher);
+        h.to_bits().hash(&mut hasher);
+    }
+    
+    format!("{:x}", hasher.finish())
+}
+
+/// 检查是否存在重复事件（5分钟内的相同指纹）
+pub fn is_duplicate_event(
+    conn: &Connection,
+    fingerprint: &str,
+    time_window_ms: i64,
+) -> AppResult<bool> {
+    let now = chrono::Utc::now().timestamp_millis();
+    let cutoff_time = now - time_window_ms;
+    
+    let count: i64 = conn.query_row(
+        r#"
+        SELECT COUNT(*) FROM user_events
+        WHERE fingerprint = ? AND timestamp > ?
+        "#,
+        params![fingerprint, cutoff_time],
+        |row| row.get(0),
+    )?;
+    
+    Ok(count > 0)
 }
