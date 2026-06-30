@@ -1,5 +1,5 @@
 [workspace]
-members = ["native"]
+members = ["native", "native/src/codex-extracted"]
 resolver = "2"
 
 [workspace.package]
