@@ -13,6 +13,7 @@ pub mod agent;
 pub mod scheduler;      // 智能并行调度器
 pub mod context_manager; // 上下文管理器
 pub mod checkpoint;     // 检查点管理器
+pub mod tool_registry;  // 统一工具注册表（借鉴 Codex 设计）
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
