@@ -123,10 +123,35 @@ impl CodexAgent {
                     .map_err(|e| AppError::Internal(format!("Failed to write to codex stdin: {}", e)))?;
                 stdin.write_all(b"\n").await
                     .map_err(|e| AppError::Internal(format!("Failed to write newline: {}", e)))?;
+                
+                // 重新设置 stdin（如果需要继续对话）
+                child.stdin = Some(stdin);
             }
             
-            // TODO: 启动后台任务读取 stdout 并转发到 tx
-            warn!("⚠️  Stream reading not fully implemented yet");
+            // 启动后台任务读取 stdout 并转发到 tx
+            let mut stdout = child.stdout.take()
+                .ok_or_else(|| AppError::Internal("Codex CLI stdout not available".into()))?;
+            
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                
+                while let Ok(Some(line)) = lines.next_line().await {
+                    // 解析 Codex JSON 响应
+                    if let Ok(json_value) = serde_json::from_str::<Value>(&line) {
+                        // 提取文本内容
+                        if let Some(text) = extract_text_from_codex_response(&json_value) {
+                            if tx_clone.send(text).await.is_err() {
+                                break; // 接收端已关闭
+                            }
+                        }
+                    }
+                }
+                
+                info!("🧵 Codex CLI stream ended");
+            });
         }
         
         Ok(rx)
@@ -160,6 +185,27 @@ impl Drop for CodexThreadHandle {
             let _ = child.start_kill();
         }
     }
+}
+
+/// 从 Codex JSON 响应中提取文本内容
+fn extract_text_from_codex_response(json: &Value) -> Option<String> {
+    // TODO: 根据实际的 Codex JSON 格式解析
+    // 这里是一个通用的实现，需要根据实际情况调整
+    
+    // 尝试常见的字段路径
+    if let Some(text) = json.get("content").and_then(|v| v.as_str()) {
+        return Some(text.to_string());
+    }
+    
+    if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+        return Some(delta.to_string());
+    }
+    
+    if let Some(text) = json.get("text").and_then(|v| v.as_str()) {
+        return Some(text.to_string());
+    }
+    
+    None
 }
 
 /// 全局 Codex Agent 实例（单例）
