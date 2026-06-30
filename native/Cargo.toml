@@ -63,8 +63,8 @@ async-trait = "0.1"
 # URL encoding
 tokio-util = { version = "0.7", features = ["io"] }
 
-# Codex Agent (直接对接 Codex 内核)
-codex-core = { path = "src/codex/codex-rs/core" }
+# Codex Agent (通过 CLI 调用，避免复杂依赖)
+# codex-core = { path = "src/codex/codex-rs/core" }
 
 [build-dependencies]
 napi-build = "2"
