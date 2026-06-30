@@ -51,6 +51,7 @@ dist_electron/
 electron/dist/
 native/*.node
 native/target/
+native/src/codex
 # native/src/codex* 已移除，允许 codex-integration 被跟踪
 
 # Misc
