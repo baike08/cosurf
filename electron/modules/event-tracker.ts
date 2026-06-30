@@ -24,6 +24,15 @@ function getNative(): any {
 }
 
 /**
+ * 获取当前活跃的标签页 ID
+ */
+function getActiveTabId(tabManager: TabManager): string | undefined {
+  // TabManager 应该有获取活跃 tab 的方法
+  // 如果没有，返回 undefined
+  return (tabManager as any).activeTabId || undefined;
+}
+
+/**
  * 插入用户行为事件
  */
 async function insertUserEvent(event: {
@@ -164,6 +173,47 @@ export function initEventTracker(tabManager: TabManager, mainWindow: BrowserWind
       tab_id: tabId,
       window_id: mainWindow.id,
       data: { duration, title }
+    });
+  });
+
+  // 6. 监听内容选择事件（通过 IPC）
+  ipcMain.on('webview:content-selected', (_event, data: any) => {
+    const { text, url, title, selectionType, areaX, areaY, areaWidth, areaHeight, highlightColor } = data;
+    console.log(`[EventTracker] Content selected (${selectionType || 'text'}): ${text.substring(0, 50)}...`);
+    
+    insertUserEvent({
+      id: `content-select-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'content_select',
+      timestamp: Date.now(),
+      url: url,
+      tab_id: getActiveTabId(tabManager), // 获取当前活跃 tab
+      window_id: mainWindow.id,
+      data: {
+        selected_text: text,
+        text_length: text.length,
+        title: title,
+        selection_type: selectionType || 'text',
+        area_x: areaX,
+        area_y: areaY,
+        area_width: areaWidth,
+        area_height: areaHeight,
+        highlight_color: highlightColor,
+      }
+    });
+  });
+
+  // 7. 监听 AI 右键菜单请求（通过 IPC）
+  ipcMain.on('ai-panel:request', (_event, data: any) => {
+    const { action, prompt, selectedText, url, title } = data;
+    console.log(`[EventTracker] AI panel request: ${action}`);
+    
+    // 转发到前端 React 应用
+    mainWindow.webContents.send('ai-panel:insert-prompt', {
+      action,
+      prompt,
+      selectedText,
+      url,
+      title,
     });
   });
 

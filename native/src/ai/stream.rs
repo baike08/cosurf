@@ -136,10 +136,18 @@ pub async fn stream_chat_completion(
     // 初始化 CheckpointManager（使用 SQLite 存储）
     // 使用应用数据目录存储检查点数据库
     let app_data_dir = std::env::var("COSURF_APP_DATA_DIR")
-        .unwrap_or_else(|_| ".".to_string());
+        .unwrap_or_else(|_| {
+            warn!("⚠️  COSURF_APP_DATA_DIR not set, using current directory");
+            ".".to_string()
+        });
+    
+    info!("🔍 Checkpoint: app_data_dir={}, conversation_id={}", app_data_dir, conversation_id);
+    
     let checkpoint_db_path = std::path::Path::new(&app_data_dir)
         .join(format!("checkpoint_{}.db", conversation_id))
         .to_string_lossy().to_string();
+    
+    info!("🔍 Checkpoint: db_path={}", checkpoint_db_path);
     
     let mut checkpoint_mgr = match CheckpointManager::new(&checkpoint_db_path) {
         Ok(mgr) => {

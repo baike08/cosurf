@@ -101,6 +101,12 @@ pub struct CheckpointManager {
 impl CheckpointManager {
     /// 创建新的检查点管理器
     pub fn new(db_path: &str) -> AppResult<Self> {
+        // 确保数据库文件的父目录存在
+        if let Some(parent) = std::path::Path::new(db_path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppError::Internal(format!("Failed to create checkpoint directory: {}", e)))?;
+        }
+        
         let db = Connection::open(db_path)
             .map_err(|e| AppError::Internal(format!("Failed to open checkpoint DB: {}", e)))?;
         

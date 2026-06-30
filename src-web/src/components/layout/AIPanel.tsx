@@ -64,6 +64,25 @@ export function AIPanel() {
     }
   }, [input]);
 
+  // 监听来自后端的 AI 面板请求（右键菜单）
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.on('ai-panel:insert-prompt', (data: any) => {
+      console.log('[AIPanel] Received prompt from context menu:', data.action);
+      
+      // 设置输入框内容
+      setInput(data.prompt);
+      
+      // 自动聚焦到输入框
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+    });
+    
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const handleSend = () => {
     if (!input.trim() || isStreaming) return;
     sendMessage(input);
